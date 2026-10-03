@@ -1,4 +1,5 @@
 import type { AgentState } from "@earendil-works/pi-agent-core";
+import type { JsonValue } from "@earendil-works/pi-ai";
 import { existsSync, readFileSync, writeFileSync } from "fs";
 import { basename, join } from "path";
 import { APP_NAME, getExportTemplateDir } from "../../config.ts";
@@ -22,6 +23,7 @@ export interface ToolHtmlRenderer {
 		result: Array<{ type: string; text?: string; data?: string; mimeType?: string }>,
 		details: unknown,
 		isError: boolean,
+		structuredContent?: JsonValue,
 	): { collapsed?: string; expanded?: string } | undefined;
 }
 
@@ -214,6 +216,7 @@ function preRenderCustomTools(
 					msg.content,
 					msg.details,
 					msg.isError || false,
+					msg.structuredContent,
 				);
 				if (rendered) {
 					renderedTools[msg.toolCallId] = {

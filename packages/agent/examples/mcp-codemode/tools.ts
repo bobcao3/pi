@@ -154,8 +154,9 @@ export function createCodemodeTool(
 			const sandbox = new CodemodeSandbox({ tools: sandboxTools, timeoutMs: 120_000 });
 			try {
 				const result = await sandbox.execute(params.code, { signal });
-				// Items from text(), console.*, and image(), in order. They have pi-ai's content shapes.
-				const content: (TextContent | ImageContent)[] = [...result.output];
+				const content: (TextContent | ImageContent)[] = result.output.map((item) =>
+					item.type === "image" ? item : { type: "text", text: item.text },
+				);
 				if (result.ok && result.value !== undefined) {
 					const value = typeof result.value === "string" ? result.value : JSON.stringify(result.value);
 					content.push({ type: "text", text: value });

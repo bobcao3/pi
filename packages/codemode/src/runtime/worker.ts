@@ -62,7 +62,7 @@ async function main(data: WorkerData): Promise<void> {
 	});
 
 	// Called from the prelude with primitives only.
-	const bridge = vm.newFunction("bridge", (kind, a, b, c) => {
+	const bridge = vm.newFunction("bridge", (kind, a, b, c, d) => {
 		switch (kind.toString()) {
 			case "call":
 			case "global":
@@ -80,7 +80,8 @@ async function main(data: WorkerData): Promise<void> {
 					item:
 						a.toString() === "image"
 							? { type: "image", data: b.toString(), mimeType: c.toString() }
-							: { type: "text", text: b.toString() },
+							: { type: a.toString() === "json" ? "json" : "text", text: b.toString() },
+					...(a.toString() === "json" && c !== undefined && !c.isUndefined ? { schema: c.toString() } : {}),
 				});
 				break;
 			case "done":
@@ -90,6 +91,7 @@ async function main(data: WorkerData): Promise<void> {
 						ok: true,
 						value: b === undefined || b.isUndefined ? undefined : b.toString(),
 						writes: c.toString(),
+						...(d !== undefined && !d.isUndefined ? { schema: d.toString() } : {}),
 					});
 				} else {
 					post({ type: "done", ok: false, error: b.toString() });
@@ -131,6 +133,7 @@ async function main(data: WorkerData): Promise<void> {
 					vm.newNumber(message.id),
 					message.ok ? vm.true : vm.false,
 					message.payload === undefined ? vm.undefined : vm.newString(message.payload),
+					message.schema === undefined ? vm.undefined : vm.newString(message.schema),
 				);
 			});
 			drain();

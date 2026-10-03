@@ -2,6 +2,11 @@ import { type ExecFileException, execFile, spawnSync } from "child_process";
 import { existsSync, type FSWatcher, readFileSync, type Stats, statSync, unwatchFile, watchFile } from "fs";
 import { dirname, join, resolve } from "path";
 import { closeWatcher, FS_WATCH_RETRY_DELAY_MS, watchWithErrorHandler } from "../utils/fs-watch.ts";
+import type { VcsSource, VcsSourceFactory } from "./vcs-source.ts";
+
+export interface FooterProject {
+	cwd: string;
+}
 
 export type GitPaths = {
 	repoDir: string;
@@ -37,6 +42,7 @@ export function findGitPaths(cwd: string): GitPaths | null {
 					if (!existsSync(headPath)) return null;
 					return { repoDir: dir, commonGitDir: gitPath, headPath };
 				}
+				return null;
 			} catch {
 				return null;
 			}
@@ -98,6 +104,7 @@ function shouldPollGitHead(repoDir: string): boolean {
  */
 export class FooterDataProvider {
 	private cwd: string;
+	private vcsSource: VcsSource | undefined;
 	private static readonly WATCH_DEBOUNCE_MS = 500;
 
 	private extensionStatuses = new Map<string, string>();
@@ -117,10 +124,31 @@ export class FooterDataProvider {
 	private refreshPending = false;
 	private disposed = false;
 
-	constructor(cwd: string) {
+	constructor(cwd: string, createVcsSource?: VcsSourceFactory) {
 		this.cwd = cwd;
 		this.gitPaths = findGitPaths(cwd);
 		this.setupGitWatcher();
+		this.vcsSource = createVcsSource?.(cwd, {
+			getStatus: this.getGitBranch.bind(this),
+			refresh: () => {
+				this.cachedBranch = undefined;
+				this.gitPaths = findGitPaths(this.cwd);
+				this.setupGitWatcher();
+			},
+		});
+		this.vcsSource?.onChange(() => this.notifyBranchChange());
+	}
+
+	getCwd(): string {
+		return this.cwd;
+	}
+
+	getVcsStatus(): string | null {
+		return this.vcsSource ? this.vcsSource.getStatus() : this.getGitBranch();
+	}
+
+	setProject(project: FooterProject): void {
+		this.setCwd(project.cwd);
 	}
 
 	/** Current git branch, null if not in repo, "detached" if detached HEAD */
@@ -180,6 +208,7 @@ export class FooterDataProvider {
 		this.cachedBranch = undefined;
 		this.gitPaths = findGitPaths(cwd);
 		this.setupGitWatcher();
+		this.vcsSource?.setCwd(cwd);
 		this.notifyBranchChange();
 	}
 
@@ -191,6 +220,7 @@ export class FooterDataProvider {
 			this.refreshTimer = null;
 		}
 		this.clearGitWatchers();
+		this.vcsSource?.dispose();
 		this.branchChangeCallbacks.clear();
 	}
 
@@ -218,9 +248,10 @@ export class FooterDataProvider {
 		}
 
 		this.refreshInFlight = true;
+		const gitPaths = this.gitPaths;
 		try {
 			const nextBranch = await this.resolveGitBranchAsync();
-			if (this.disposed) return;
+			if (this.disposed || this.gitPaths !== gitPaths) return;
 			if (this.cachedBranch !== undefined && this.cachedBranch !== nextBranch) {
 				this.cachedBranch = nextBranch;
 				this.notifyBranchChange();
@@ -384,5 +415,5 @@ export class FooterDataProvider {
 /** Read-only view for extensions - excludes setExtensionStatus, setAvailableProviderCount and dispose */
 export type ReadonlyFooterDataProvider = Pick<
 	FooterDataProvider,
-	"getGitBranch" | "getExtensionStatuses" | "getAvailableProviderCount" | "onBranchChange"
+	"getCwd" | "getVcsStatus" | "getGitBranch" | "getExtensionStatuses" | "getAvailableProviderCount" | "onBranchChange"
 >;

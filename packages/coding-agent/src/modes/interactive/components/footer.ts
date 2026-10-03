@@ -1,8 +1,9 @@
 import { isAbsolute, relative, resolve, sep } from "node:path";
-import { type Component, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import type { AgentSession } from "../../../core/agent-session.ts";
 import { areExperimentalFeaturesEnabled } from "../../../core/experimental.ts";
 import type { ContextUsage } from "../../../core/extensions/types.ts";
+import type { FooterContent, ReadonlyFooter } from "../../../core/footer-content.ts";
 import type { ReadonlyFooterDataProvider } from "../../../core/footer-data-provider.ts";
 import { addUsageToTotals, createUsageTotals, type UsageTotals } from "../../../core/usage-totals.ts";
 import { theme } from "../theme/theme.ts";
@@ -59,7 +60,7 @@ interface SessionStats {
  * Footer component that shows pwd, token stats, and context usage.
  * Computes token/context stats from session, gets git branch and extension statuses from provider.
  */
-export class FooterComponent implements Component {
+export class FooterComponent implements ReadonlyFooter {
 	private autoCompactEnabled = true;
 	private session: AgentSession;
 	private footerData: ReadonlyFooterDataProvider;
@@ -154,18 +155,15 @@ export class FooterComponent implements Component {
 		return this.sessionStats;
 	}
 
-	render(width: number): string[] {
+	getContent(): FooterContent {
 		const state = this.session.state;
 		const { usageTotals, latestCacheHitRate, contextUsage } = this.getSessionStats();
 		const contextWindow = contextUsage?.contextWindow ?? state.model?.contextWindow ?? 0;
-		const contextPercentValue = contextUsage?.percent ?? 0;
-		const contextPercent = contextUsage?.percent !== null ? contextPercentValue.toFixed(1) : "?";
 
 		// Replace home directory with ~
-		let pwd = formatCwdForFooter(this.session.sessionManager.getCwd(), process.env.HOME || process.env.USERPROFILE);
+		let pwd = formatCwdForFooter(this.footerData.getCwd(), process.env.HOME || process.env.USERPROFILE);
 
-		// Add git branch if available
-		const branch = this.footerData.getGitBranch();
+		const branch = this.footerData.getVcsStatus();
 		if (branch) {
 			pwd = `${pwd} (${branch})`;
 		}
@@ -175,6 +173,27 @@ export class FooterComponent implements Component {
 		if (sessionName) {
 			pwd = `${pwd} • ${sessionName}`;
 		}
+		const routed = this.session.routedModel;
+		return {
+			project: pwd,
+			model: state.model?.id || "no-model",
+			thinkingLevel: state.model?.reasoning ? state.thinkingLevel || "off" : undefined,
+			routedModel: routed ? { id: routed.model.id, thinkingLevel: routed.thinkingLevel } : undefined,
+			provider: state.model?.provider,
+			usage: { ...usageTotals },
+			cacheHitRate: latestCacheHitRate,
+			contextWindow,
+			contextPercent: contextUsage?.percent === null ? null : (contextUsage?.percent ?? 0),
+			experimental: areExperimentalFeaturesEnabled(),
+		};
+	}
+
+	render(width: number): string[] {
+		const state = this.session.state;
+		const content = this.getContent();
+		const { usage: usageTotals, cacheHitRate: latestCacheHitRate, contextWindow, project: pwd } = content;
+		const contextPercentValue = content.contextPercent ?? 0;
+		const contextPercent = content.contextPercent === null ? "?" : contextPercentValue.toFixed(1);
 
 		// Build stats line
 		const statsParts = [];
@@ -210,14 +229,11 @@ export class FooterComponent implements Component {
 			contextPercentStr = contextPercentDisplay;
 		}
 		statsParts.push(contextPercentStr);
-		if (areExperimentalFeaturesEnabled()) {
+		if (content.experimental) {
 			statsParts.push(`${theme.fg("dim", "•")} ${theme.bold(theme.fg("warning", "xp"))}`);
 		}
 
 		let statsLeft = statsParts.join(" ");
-
-		// Add model name on the right side, plus thinking level if model supports it
-		const modelName = state.model?.id || "no-model";
 
 		let statsLeftWidth = visibleWidth(statsLeft);
 
@@ -230,24 +246,20 @@ export class FooterComponent implements Component {
 		// Calculate available space for padding (minimum 2 spaces between stats and model)
 		const minPadding = 2;
 
-		// Add thinking level indicator if model supports reasoning
-		let rightSideWithoutProvider = modelName;
-		if (state.model?.reasoning) {
-			const thinkingLevel = state.thinkingLevel || "off";
-			rightSideWithoutProvider =
-				thinkingLevel === "off" ? `${modelName} • thinking off` : `${modelName} • ${thinkingLevel}`;
+		let rightSideWithoutProvider = content.model;
+		if (content.thinkingLevel) {
+			rightSideWithoutProvider +=
+				content.thinkingLevel === "off" ? " • thinking off" : ` • ${content.thinkingLevel}`;
 		}
-		// A virtual model routes each request; show where the latest response went.
-		const routed = this.session.routedModel;
-		if (routed) {
-			const level = routed.thinkingLevel ? ` • ${routed.thinkingLevel}` : "";
-			rightSideWithoutProvider += ` → ${routed.model.id}${level}`;
+		if (content.routedModel) {
+			const routed = content.routedModel;
+			rightSideWithoutProvider += ` → ${routed.id}${routed.thinkingLevel ? ` • ${routed.thinkingLevel}` : ""}`;
 		}
 
 		// Prepend the provider in parentheses if there are multiple providers and there's enough room
 		let rightSide = rightSideWithoutProvider;
-		if (this.footerData.getAvailableProviderCount() > 1 && state.model) {
-			rightSide = `(${state.model!.provider}) ${rightSideWithoutProvider}`;
+		if (content.provider && this.footerData.getAvailableProviderCount() > 1) {
+			rightSide = `(${content.provider}) ${rightSideWithoutProvider}`;
 			if (statsLeftWidth + minPadding + visibleWidth(rightSide) > width) {
 				// Too wide, fall back
 				rightSide = rightSideWithoutProvider;

@@ -927,6 +927,9 @@ function createToolResultMessage(finalized: FinalizedToolCallOutcome): ToolResul
 		// Untyped tools (JS extensions) can return results without content; normalize
 		// so the null never enters session history or provider payloads.
 		content: finalized.result.content ?? [],
+		...(finalized.result.structuredContent === undefined
+			? {}
+			: { structuredContent: finalized.result.structuredContent }),
 		details: finalized.result.details,
 		usage: finalized.result.usage,
 		isError: finalized.isError,

@@ -1,9 +1,9 @@
 import type { AssistantMessage } from "@earendil-works/pi-ai";
-import type { TuiMouseEvent } from "@earendil-works/pi-tui";
+import { type TuiMouseEvent, visibleWidth } from "@earendil-works/pi-tui";
 import { describe, expect, test } from "vitest";
 import { AssistantMessageComponent } from "../src/modes/interactive/components/assistant-message.ts";
 import { UserMessageComponent } from "../src/modes/interactive/components/user-message.ts";
-import { initTheme } from "../src/modes/interactive/theme/theme.ts";
+import { getMarkdownTheme, initTheme } from "../src/modes/interactive/theme/theme.ts";
 import { stripAnsi } from "../src/utils/ansi.ts";
 
 const OSC133_ZONE_START = "\x1b]133;A\x07";
@@ -127,7 +127,7 @@ describe("AssistantMessageComponent", () => {
 		expect(collapsed).toContain("second reasoning");
 	});
 
-	test("uses configured output padding for text and thinking", () => {
+	test("keeps the thinking icon gutter independent of assistant output padding", () => {
 		initTheme("dark");
 
 		const component = new AssistantMessageComponent(
@@ -143,12 +143,43 @@ describe("AssistantMessageComponent", () => {
 		const lines = component.render(80).map((line) => stripAnsi(line));
 
 		expect(lines.some((line) => line.includes(" hello"))).toBe(true);
-		expect(lines.some((line) => line.includes(" reasoning"))).toBe(true);
+		expect(lines.some((line) => line.startsWith("💡 reasoning"))).toBe(true);
 
 		component.setOutputPad(0);
 		const updatedLines = component.render(80).map((line) => stripAnsi(line));
 		expect(updatedLines.some((line) => line.startsWith("hello"))).toBe(true);
-		expect(updatedLines.some((line) => line.startsWith("reasoning"))).toBe(true);
+		expect(updatedLines.some((line) => line.startsWith("💡 reasoning"))).toBe(true);
+	});
+
+	test("reserves three thinking columns through wrapping, collapse, streaming, and resize without italics", () => {
+		initTheme("dark");
+		const message = createAssistantMessage([
+			{ type: "thinking", thinking: "*first thought* with enough words to wrap\n\n> quoted thought" },
+			{ type: "thinking", thinking: "second thought" },
+		]);
+		const markdownTheme = { ...getMarkdownTheme(), italic: (text: string) => `\x1b[3m${text}\x1b[23m` };
+		const component = new AssistantMessageComponent(undefined, false, markdownTheme);
+		component.updateContent(message, true);
+		for (const width of [1, 2, 3, 4, 12, 40, 80]) {
+			const lines = component.render(width);
+			const visible = lines.map(stripAnsi).filter((line) => line.trim());
+			expect(lines.join("\n")).not.toMatch(/\x1b\[(?:3|23)m/);
+			for (const line of lines) expect(visibleWidth(line)).toBeLessThanOrEqual(width);
+			if (width < 3) continue;
+			expect(visible[0]).toMatch(/^💡 /);
+			expect(visible.slice(1).every((line) => line.startsWith("   "))).toBe(true);
+		}
+		component.updateContent(message, false);
+		component.setHideThinkingBlock(true);
+		expect(
+			component
+				.render(40)
+				.map(stripAnsi)
+				.find((line) => line.trim())
+				?.trimEnd(),
+		).toBe("💡 Thinking...");
+		component.setHideThinkingBlock(false);
+		expect(stripAnsi(component.render(80).join("\n"))).toContain("💡 first thought");
 	});
 
 	test("chains Markdown transformers in registration order", () => {

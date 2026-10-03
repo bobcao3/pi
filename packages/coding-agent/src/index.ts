@@ -1,9 +1,10 @@
 // Core session management
 
 export { type Args, parseArgs } from "./cli/args.ts";
-
+export { setupCli } from "./cli/setup.ts";
 // Config paths
 export {
+	APP_NAME,
 	CONFIG_DIR_NAME,
 	getAgentDir,
 	getDocsPath,
@@ -213,8 +214,9 @@ export {
 	wrapRegisteredTool,
 	wrapRegisteredTools,
 } from "./core/extensions/index.ts";
+export type { FooterContent, ReadonlyFooter } from "./core/footer-content.ts";
 // Footer data provider (git branch + extension statuses - data not otherwise available to extensions)
-export type { ReadonlyFooterDataProvider } from "./core/footer-data-provider.ts";
+export { FooterDataProvider, type ReadonlyFooterDataProvider } from "./core/footer-data-provider.ts";
 export type { RegisteredMcpServer } from "./core/mcp-servers.ts";
 export { convertToLlm } from "./core/messages.ts";
 export { ModelRegistry } from "./core/model-registry.ts";
@@ -388,6 +390,7 @@ export {
 	type WriteToolOptions,
 	withFileMutationQueue,
 } from "./core/tools/index.ts";
+export { getStructuredToolOutput } from "./core/tools/structured-output.ts";
 export {
 	hasTrustRequiringProjectResources,
 	type ProjectTrustDecision,
@@ -395,6 +398,8 @@ export {
 	type ProjectTrustStoreEntry,
 	type ProjectTrustUpdate,
 } from "./core/trust-manager.ts";
+// Main entry point
+export type { VcsSource, VcsSourceFactory } from "./core/vcs-source.ts";
 export {
 	type ModelRoute,
 	type ModelRouteReason,
@@ -405,11 +410,12 @@ export {
 } from "./core/virtual-models.ts";
 // Built-in extensions. The CLI loads them; SDK sessions add them to their extension factories.
 export { type CodemodeExtensionOptions, createCodemodeExtension } from "./extensions/codemode/index.ts";
+export { type CodemodeOutputMetadata, formatCodemodeOutput } from "./extensions/codemode/output.ts";
 export type { CodemodeStoreEntryData, CodemodeToolDetails } from "./extensions/codemode/tool.ts";
+export { builtInExtensions } from "./extensions/index.ts";
 export type { LoadedMcpConfig, McpExposure, McpServerConfig, McpServerEntry } from "./extensions/mcp/config.ts";
 export { createMcpExtension, type McpExtensionOptions, type McpTransportFactory } from "./extensions/mcp/index.ts";
 export { createToolSearchExtension } from "./extensions/tool-search/index.ts";
-// Main entry point
 export { type MainOptions, main } from "./main.ts";
 // Run modes for programmatic SDK usage
 export {
@@ -429,7 +435,8 @@ export {
 	runPrintMode,
 	runRpcMode,
 } from "./modes/index.ts";
-// UI components for extensions
+export { CustomEntryComponent } from "./modes/interactive/components/custom-entry.ts";
+export { formatTokens } from "./modes/interactive/components/footer.ts";
 export {
 	ArminComponent,
 	AssistantMessageComponent,
@@ -469,12 +476,20 @@ export {
 	UserMessageSelectorComponent,
 	type VisualTruncateResult,
 } from "./modes/interactive/components/index.ts";
+// UI components for extensions
+export {
+	ObjectTreeComponent,
+	type ObjectTreeOptions,
+	type ObjectTreeState,
+	parseTreeOutput,
+} from "./modes/interactive/components/object-tree.ts";
 // Theme utilities for custom tools and extensions
 export {
 	getLanguageFromPath,
 	getMarkdownTheme,
 	getSelectListTheme,
 	getSettingsListTheme,
+	getThemeByName,
 	highlightCode,
 	initTheme,
 	Theme,

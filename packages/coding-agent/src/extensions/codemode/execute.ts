@@ -3,15 +3,10 @@
  * execute.lazy.ts so the sandbox runtime only loads when a script runs.
  */
 
-import { randomBytes } from "node:crypto";
-import { writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import type { AgentTool, AgentToolCallOutcome, AgentToolResult } from "@earendil-works/pi-agent-core";
 import type {
 	AnyModel,
 	ClassifierContext,
-	ImageContent,
 	ImagesContext,
 	ModelType,
 	ModelTypeMap,
@@ -32,6 +27,7 @@ import type { ExtensionToolContext, ToolNamespace } from "../../core/extensions/
 import type { SessionEntry } from "../../core/session-manager.ts";
 import { combineUsage } from "../../core/usage-totals.ts";
 import { Bm25Ranker, createToolSearchDocument, DEFAULT_TOOL_SEARCH_LIMIT } from "../tool-search/tool.ts";
+import { buildCodemodeOutput } from "./output.ts";
 import {
 	CODEMODE_DOCS_PATH,
 	CODEMODE_STORE_ENTRY_TYPE,
@@ -229,76 +225,6 @@ export function readCodemodeStore(branch: readonly SessionEntry[]): Record<strin
 	return Object.fromEntries(store);
 }
 
-/** Default token budget for script output. */
-const DEFAULT_MAX_OUTPUT_TOKENS = 10_000;
-/** Characters per token when estimating. */
-const CHARS_PER_TOKEN = 4;
-
-/** Like the script's `text()`: strings as is, other values as compact JSON. */
-function valueText(value: unknown): string {
-	if (typeof value === "string") return value;
-	return JSON.stringify(value) ?? String(value);
-}
-
-function formatCallSummary(calls: readonly CodemodeNestedCall[]): string {
-	if (calls.length === 0) return "No tool calls were made.";
-	return `Tool calls made before the failure (they are not undone): ${calls.map((call) => `${call.name} (${call.status})`).join(", ")}`;
-}
-
-function formatError(result: Extract<CodemodeResult, { ok: false }>, calls: readonly CodemodeNestedCall[]): string {
-	const { error } = result;
-	const head =
-		error.kind === "script"
-			? (error.stack ?? `${error.name ?? "Error"}: ${error.message}`)
-			: error.kind === "timeout"
-				? `Script timed out: ${error.message}`
-				: error.kind === "aborted"
-					? `Script aborted: ${error.message}`
-					: `Script sandbox failed: ${error.message}`;
-	return `${head}\n\n${formatCallSummary(calls)}`;
-}
-
-/** Write the full text output to a temp file, like bash does for truncated output. */
-async function spillOutput(text: string): Promise<{ path: string } | { error: string }> {
-	const path = join(tmpdir(), `pi-codemode-${randomBytes(8).toString("hex")}.txt`);
-	try {
-		await writeFile(path, text);
-		return { path };
-	} catch (error) {
-		return { error: error instanceof Error ? error.message : String(error) };
-	}
-}
-
-/**
- * Apply the token budget: when the combined text exceeds it, the text items become one
- * item that keeps the start and end of the text, and images follow it. The full text is written to
- * a temp file.
- */
-async function truncateOutput(
-	items: (TextContent | ImageContent)[],
-	maxTokens: number,
-): Promise<{ items: (TextContent | ImageContent)[]; fullOutputPath?: string }> {
-	const texts = items.filter((item): item is TextContent => item.type === "text").map((item) => item.text);
-	const combined = texts.join("\n");
-	const budget = maxTokens * CHARS_PER_TOKEN;
-	if (texts.length === 0 || combined.length <= budget) return { items };
-	const headChars = Math.floor(budget / 2);
-	const tailChars = budget - headChars;
-	const removed = combined.length - headChars - tailChars;
-	const head = combined.slice(0, headChars);
-	const tail = tailChars > 0 ? combined.slice(-tailChars) : "";
-	let text = `Warning: truncated output (original token count: ${Math.ceil(combined.length / CHARS_PER_TOKEN)})\nTotal output lines: ${combined.split("\n").length}\n\n${head}…${Math.ceil(removed / CHARS_PER_TOKEN)} tokens truncated…${tail}`;
-	const spilled = await spillOutput(combined);
-	text +=
-		"path" in spilled
-			? `\n\n[Full output: ${spilled.path} (read with offset/limit)]`
-			: `\n\n[Could not save the full output: ${spilled.error}]`;
-	return {
-		items: [{ type: "text", text }, ...items.filter((item) => item.type === "image")],
-		...("path" in spilled ? { fullOutputPath: spilled.path } : {}),
-	};
-}
-
 /**
  * The value a script receives for a nested call: a tool that declares
  * `outputSchema` resolves to its `structuredContent`, also for error results that carry one (such
@@ -347,6 +273,7 @@ export async function executeCodemode(
 	const samples = new Map(callable.map((tool) => [tool.name, renderToolSample(toCodemodeDeclaration(tool))]));
 	const sandboxTools: CodemodeTool[] = callable.map((tool) => ({
 		name: tool.name,
+		outputSchema: toCodemodeDeclaration(tool).outputSchema,
 		description: samples.get(tool.name),
 		execute: async (args, { signal: callSignal }) => {
 			const record: CodemodeNestedCall = {
@@ -400,33 +327,18 @@ export async function executeCodemode(
 		if (call.status === "running") call.status = "cancelled";
 	}
 
-	const items: (TextContent | ImageContent)[] = result.output.map((item) =>
-		item.type === "text" ? { type: "text", text: item.text } : item,
-	);
 	if (result.ok) {
 		const { set, delete: deleted } = result.storeWrites;
 		if (Object.keys(set).length > 0 || deleted.length > 0) {
 			options.appendEntry?.(CODEMODE_STORE_ENTRY_TYPE, { set, delete: deleted });
 		}
-		// pi extension: a returned value is appended like text().
-		if (result.value !== undefined) items.push({ type: "text", text: valueText(result.value) });
-	} else {
-		items.push({ type: "text", text: `Script error:\n${formatError(result, calls)}` });
 	}
-	if (generatedImages > 0 && !items.some((item) => item.type === "image")) {
-		items.push({
-			type: "text",
-			text: `Note: models.generateImages() returned ${generatedImages} image${generatedImages === 1 ? "" : "s"} that the script did not show. Show each image block of result.output with image(block).`,
-		});
-	}
-
-	const truncated = await truncateOutput(items, sourceOptions.maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS);
+	const output = await buildCodemodeOutput(result, calls, generatedImages, sourceOptions.maxOutputTokens);
 	const wallTime = ((performance.now() - startedAt) / 1000).toFixed(1);
 	const header = `${result.ok ? "Script completed" : "Script failed"}\nWall time ${wallTime} seconds\nOutput:\n`;
-	const details = snapshot();
-	if (truncated.fullOutputPath) details.fullOutputPath = truncated.fullOutputPath;
+	const details = { ...snapshot(), ...output.details };
 	return {
-		content: [{ type: "text", text: header }, ...truncated.items],
+		content: [{ type: "text", text: header }, ...output.content],
 		details,
 		...(modelUsage ? { usage: modelUsage } : {}),
 		...(result.ok ? {} : { isError: true }),

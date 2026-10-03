@@ -524,6 +524,7 @@ interface PackageJson {
 	piConfig?: {
 		name?: string;
 		configDir?: string;
+		selfUpdate?: boolean;
 	};
 }
 
@@ -535,12 +536,17 @@ try {
 	if (err.code !== "ENOENT") throw e;
 }
 
-const piConfigName: string | undefined = pkg.piConfig?.name;
-export const PACKAGE_NAME: string = pkg.name || "@earendil-works/pi-coding-agent";
+const applicationManifest = process.env.PI_APPLICATION_MANIFEST;
+const application: PackageJson = applicationManifest
+	? JSON.parse(stripBom(readFileSync(normalizePath(applicationManifest), "utf-8")))
+	: pkg;
+const piConfigName: string | undefined = application.piConfig?.name;
+export const PACKAGE_NAME: string = application.name || "@earendil-works/pi-coding-agent";
 export const APP_NAME: string = piConfigName || "pi";
 export const APP_TITLE: string = piConfigName ? APP_NAME : "π";
-export const CONFIG_DIR_NAME: string = pkg.piConfig?.configDir || ".pi";
-export const VERSION: string = pkg.version || "0.0.0";
+export const CONFIG_DIR_NAME: string = application.piConfig?.configDir || ".pi";
+export const VERSION: string = application.version || "0.0.0";
+export const SELF_UPDATE_ALLOWED = application.piConfig?.selfUpdate !== false;
 
 // e.g., PI_CODING_AGENT_DIR or TAU_CODING_AGENT_DIR
 export const ENV_AGENT_DIR = `${APP_NAME.toUpperCase()}_CODING_AGENT_DIR`;

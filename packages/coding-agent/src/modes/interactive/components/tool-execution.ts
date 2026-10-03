@@ -1,3 +1,4 @@
+import type { JsonValue } from "@earendil-works/pi-ai";
 import {
 	Box,
 	type Component,
@@ -56,6 +57,7 @@ export class ToolExecutionComponent extends Container {
 		content: Array<{ type: string; text?: string; data?: string; mimeType?: string }>;
 		isError: boolean;
 		details?: any;
+		structuredContent?: JsonValue;
 	};
 	private hideComponent = false;
 
@@ -183,6 +185,7 @@ export class ToolExecutionComponent extends Container {
 			content: Array<{ type: string; text?: string; data?: string; mimeType?: string }>;
 			details?: any;
 			isError: boolean;
+			structuredContent?: JsonValue;
 		},
 		isPartial = false,
 	): void {
@@ -298,7 +301,12 @@ export class ToolExecutionComponent extends Container {
 				} else {
 					try {
 						const component = resultRenderer(
-							{ content: this.result.content as any, details: this.result.details },
+							{
+								content: this.result.content as any,
+								details: this.result.details,
+								structuredContent: this.result.structuredContent,
+								isError: this.result.isError,
+							},
 							{ expanded: this.expanded, isPartial: this.isPartial },
 							theme,
 							this.getRenderContext(this.resultRendererComponent),

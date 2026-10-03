@@ -12,7 +12,7 @@ export type CustomEditorOptions = EditorOptions & {
  */
 export class CustomEditor extends Editor {
 	private keybindings: KeybindingsManager;
-	private workingStatusIndicator: StatusIndicator | undefined;
+	protected workingStatusIndicator: StatusIndicator | undefined;
 	public readonly embedWorkingStatus: boolean;
 	public actionHandlers: Map<AppKeybinding, () => void> = new Map();
 

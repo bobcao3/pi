@@ -61,7 +61,8 @@ import type { CacheWarmingDecisionEvent, CacheWarmingDecisionEventResult } from 
 import type { CompactionPreparation, CompactionResult } from "../compaction/index.ts";
 import type { EventBus } from "../event-bus.ts";
 import type { ExecOptions, ExecResult } from "../exec.ts";
-import type { ReadonlyFooterDataProvider } from "../footer-data-provider.ts";
+import type { ReadonlyFooter } from "../footer-content.ts";
+import type { FooterProject, ReadonlyFooterDataProvider } from "../footer-data-provider.ts";
 import type { KeybindingsManager } from "../keybindings.ts";
 import type { McpServerConfig, McpServerRegistry, RegisteredMcpServer } from "../mcp-servers.ts";
 import type { CustomMessage } from "../messages.ts";
@@ -200,9 +201,16 @@ export interface ExtensionUIContext {
 	 */
 	setFooter(
 		factory:
-			| ((tui: TUI, theme: Theme, footerData: ReadonlyFooterDataProvider) => Component & { dispose?(): void })
+			| ((
+					tui: TUI,
+					theme: Theme,
+					footerData: ReadonlyFooterDataProvider,
+					defaultFooter: ReadonlyFooter,
+			  ) => Component & { dispose?(): void })
 			| undefined,
 	): void;
+
+	setFooterProject(project?: FooterProject): void;
 
 	/** Set a custom header component (shown at startup, above chat), or undefined to restore the built-in header. */
 	setHeader(factory: ((tui: TUI, theme: Theme) => Component & { dispose?(): void }) | undefined): void;
