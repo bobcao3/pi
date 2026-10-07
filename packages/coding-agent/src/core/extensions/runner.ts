@@ -334,6 +334,7 @@ const noOpUIContext: ExtensionUIContext = {
 	setHiddenThinkingLabel: () => {},
 	setWidget: () => {},
 	setFooter: () => {},
+	setFooterProject: () => {},
 	setHeader: () => {},
 	setTitle: () => {},
 	custom: async () => undefined as never,

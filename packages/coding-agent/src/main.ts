@@ -61,6 +61,7 @@ import { collectSettingsDiagnostics, deduplicateDiagnostics } from "./core/setti
 import { SettingsManager } from "./core/settings-manager.ts";
 import { printTimings, resetTimings, time } from "./core/timings.ts";
 import { hasTrustRequiringProjectResources, ProjectTrustStore } from "./core/trust-manager.ts";
+import type { VcsSourceFactory } from "./core/vcs-source.ts";
 import { builtInExtensions } from "./extensions/index.ts";
 import { loadMcpCommand } from "./extensions/mcp/cli.lazy.ts";
 import { runMigrations, showDeprecationWarnings } from "./migrations.ts";
@@ -568,11 +569,14 @@ async function promptForMissingSessionCwd(
 
 export interface MainOptions {
 	extensionFactories?: InlineExtension[];
+	defaultExtensionPaths?: string[];
+	defaultSkillPaths?: string[];
+	createVcsSource?: VcsSourceFactory;
 }
 
 export async function main(args: string[], options?: MainOptions) {
 	resetTimings();
-	const extensionFactories = [...builtInExtensions, ...(options?.extensionFactories ?? [])];
+	const extensionFactories = options?.extensionFactories ?? builtInExtensions;
 	const offlineMode = args.includes("--offline") || isTruthyEnvFlag(process.env.PI_OFFLINE);
 	if (offlineMode) {
 		process.env.PI_OFFLINE = "1";
@@ -777,8 +781,14 @@ export async function main(args: string[], options?: MainOptions) {
 					}
 				: undefined,
 			resourceLoaderOptions: {
-				additionalExtensionPaths: resolvedExtensionPaths,
-				additionalSkillPaths: resolvedSkillPaths,
+				additionalExtensionPaths: [
+					...(parsed.noExtensions ? [] : (options?.defaultExtensionPaths ?? [])),
+					...(resolvedExtensionPaths ?? []),
+				],
+				additionalSkillPaths: [
+					...(parsed.noSkills ? [] : (options?.defaultSkillPaths ?? [])),
+					...(resolvedSkillPaths ?? []),
+				],
 				additionalPromptTemplatePaths: resolvedPromptTemplatePaths,
 				additionalThemePaths: resolvedThemePaths,
 				noExtensions: parsed.noExtensions,
@@ -950,6 +960,7 @@ export async function main(args: string[], options?: MainOptions) {
 		await runRpcMode(runtime);
 	} else if (appMode === "interactive") {
 		const interactiveMode = new InteractiveMode(runtime, {
+			createVcsSource: options?.createVcsSource,
 			migratedProviders,
 			startupDiagnostics,
 			modelFallbackMessage,
