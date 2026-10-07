@@ -471,6 +471,12 @@ export {
 	UserMessageSelectorComponent,
 	type VisualTruncateResult,
 } from "./modes/interactive/components/index.ts";
+export {
+	ObjectTreeComponent,
+	type ObjectTreeOptions,
+	type ObjectTreeState,
+	parseTreeOutput,
+} from "./modes/interactive/components/object-tree.ts";
 // Theme utilities for custom tools and extensions
 export {
 	getLanguageFromPath,
