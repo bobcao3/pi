@@ -5,6 +5,7 @@ import type {
 	CodemodeCallStatus,
 	CodemodeError,
 	CodemodeExecuteOptions,
+	CodemodeJsonSchema,
 	CodemodeOutputItem,
 	CodemodeResult,
 	CodemodeSandboxOptions,
@@ -20,6 +21,7 @@ import {
 } from "./protocol.ts";
 
 const DEFAULT_TIMEOUT_MS = 300_000;
+const MAX_SCHEMA_CHARS = 262144;
 const IDENTIFIER = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
 const RESERVED_GLOBALS: ReadonlySet<string> = new Set([
 	"tools",
@@ -35,6 +37,26 @@ const RESERVED_GLOBALS: ReadonlySet<string> = new Set([
 
 function errorMessage(error: unknown): string {
 	return error instanceof Error ? error.message : String(error);
+}
+
+function serializeOutputSchema(schema: CodemodeJsonSchema | undefined): string | undefined {
+	try {
+		const json = JSON.stringify(schema);
+		return json !== undefined && json.length <= MAX_SCHEMA_CHARS ? json : undefined;
+	} catch {
+		return undefined;
+	}
+}
+
+function parseOutputSchema(json: string | undefined): CodemodeJsonSchema | undefined {
+	if (json === undefined || json.length > MAX_SCHEMA_CHARS) return undefined;
+	try {
+		const value: unknown = JSON.parse(json);
+		if (typeof value === "boolean" || (value !== null && typeof value === "object" && !Array.isArray(value))) {
+			return value as CodemodeJsonSchema;
+		}
+	} catch {}
+	return undefined;
 }
 
 function serializeStore(store: Readonly<Record<string, unknown>> | undefined): Record<string, string> {
@@ -237,6 +259,10 @@ class Execution {
 		if (!isWorkerToHostMessage(message)) throw new BridgeError("unknown message from the worker");
 		switch (message.type) {
 			case "output":
+				if (message.item.type === "json" && message.schema !== undefined) {
+					const schema = parseOutputSchema(message.schema);
+					if (schema !== undefined) message.item.schema = schema;
+				}
 				this.output.push(message.item);
 				break;
 			case "call":
@@ -259,7 +285,7 @@ class Execution {
 			return;
 		}
 		const value = message.value === undefined ? undefined : parseBridgeJson(message.value, "return value");
-		this.finish(undefined, value, parseStoreWrites(message.writes));
+		this.finish(undefined, value, parseStoreWrites(message.writes), parseOutputSchema(message.schema));
 	}
 
 	private async handleCall(message: Extract<WorkerToHostMessage, { type: "call" }>): Promise<void> {
@@ -276,8 +302,15 @@ class Execution {
 			const tool = (isTool ? this.tools : this.globals).get(name);
 			if (!tool) throw new Error(`Unknown ${isTool ? "tool" : "global"} "${name}"`);
 			const args: unknown = message.args === undefined ? undefined : JSON.parse(message.args);
+			const schema = serializeOutputSchema(tool.outputSchema);
 			const value = await tool.execute(args, { signal: pending.controller.signal });
-			reply = { type: "result", id, ok: true, payload: value === undefined ? undefined : JSON.stringify(value) };
+			reply = {
+				type: "result",
+				id,
+				ok: true,
+				payload: value === undefined ? undefined : JSON.stringify(value),
+				...(schema === undefined ? {} : { schema }),
+			};
 			status = "ok";
 		} catch (error) {
 			reply = { type: "result", id, ok: false, payload: errorMessage(error) };
@@ -294,7 +327,12 @@ class Execution {
 		this.post(reply);
 	}
 
-	private finish(error: CodemodeError | undefined, value?: unknown, writes?: CodemodeStoreWrites): void {
+	private finish(
+		error: CodemodeError | undefined,
+		value?: unknown,
+		writes?: CodemodeStoreWrites,
+		valueSchema?: CodemodeJsonSchema,
+	): void {
 		if (this.finished) return;
 		this.finished = true;
 		clearTimeout(this.timer);
@@ -312,6 +350,7 @@ class Execution {
 			: {
 					ok: true,
 					value,
+					...(valueSchema === undefined ? {} : { valueSchema }),
 					output: this.output,
 					calls: this.calls,
 					storeWrites: writes ?? { set: {}, delete: [] },

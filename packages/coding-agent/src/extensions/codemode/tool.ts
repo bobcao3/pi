@@ -45,6 +45,7 @@ import type { ModelRegistry } from "../../core/model-registry.ts";
 import type { CodemodeMode } from "../../core/settings-manager.ts";
 import { wrapToolDefinition } from "../../core/tools/tool-definition-wrapper.ts";
 import { loadCodemodeExecutor } from "./execute.lazy.ts";
+import type { CodemodeOutputMetadata } from "./output.ts";
 import { codemodeRenderers } from "./renderer.ts";
 
 export const CODEMODE_TOOL_NAME = "codemode";
@@ -120,6 +121,8 @@ export interface CodemodeNestedCall {
 
 export interface CodemodeToolDetails {
 	calls: CodemodeNestedCall[];
+	output?: Record<number, CodemodeOutputMetadata>;
+	outputMetadataLimited?: boolean;
 	/** Temp file with the full text output, when the output was truncated. */
 	fullOutputPath?: string;
 }

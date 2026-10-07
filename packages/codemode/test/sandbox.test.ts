@@ -67,9 +67,9 @@ describe("script execution", () => {
 		expect(result.ok).toBe(true);
 		expect(result.output.slice(0, -1)).toEqual([
 			{ type: "text", text: 'hello 1 {"a":1}', console: true },
-			{ type: "text", text: '{"json":true}' },
+			{ type: "json", text: '{"json":true}' },
 			{ type: "text", text: "undefined" },
-			{ type: "text", text: "7" },
+			{ type: "json", text: "7" },
 			{ type: "image", data: PNG, mimeType: "image/png" },
 			{ type: "image", data: JPEG, mimeType: "image/jpeg" },
 			{ type: "image", data: GIF, mimeType: "image/gif" },
@@ -199,6 +199,7 @@ describe("script execution", () => {
 		expect(result.output[0]).toMatchObject({
 			type: "text",
 			text: expect.stringMatching(/^Error: inner\n {4}at .*codemode\.js:1/),
+			console: true,
 		});
 		expect(JSON.stringify(result.output)).not.toContain("codemode-prelude.js");
 	});
@@ -596,7 +597,7 @@ describe("limits and lifetime", () => {
 				error: { kind: "script", name: "RangeError", message: expect.stringContaining("script output exceeded") },
 			});
 			const chars = result.output.reduce(
-				(sum, item) => sum + (item.type === "text" ? item.text.length : item.data.length),
+				(sum, item) => sum + (item.type === "image" ? item.data.length : item.text.length),
 				0,
 			);
 			expect(chars).toBeLessThanOrEqual(MAX_OUTPUT_CHARS);

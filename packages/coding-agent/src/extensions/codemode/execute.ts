@@ -31,6 +31,7 @@ import { formatSize } from "../../core/tools/truncate.ts";
 import { combineUsage } from "../../core/usage-totals.ts";
 import { writeOutputFile } from "../../utils/output-files.ts";
 import { Bm25Ranker, createToolSearchDocument, DEFAULT_TOOL_SEARCH_LIMIT } from "../tool-search/tool.ts";
+import { trackCodemodeOutput } from "./output.ts";
 import {
 	CODEMODE_DOCS_PATH,
 	CODEMODE_STORE_ENTRY_TYPE,
@@ -259,19 +260,28 @@ function valueText(value: unknown): string {
  * value), each starts with a `==> text N/M <==` line. `console.*` lines follow all other output in
  * one `<console_output>` block.
  */
-function formatOutput(output: readonly CodemodeOutputItem[]): (TextContent | ImageContent)[] {
-	const total = output.filter((item) => item.type === "text" && !item.console).length;
+function formatOutput(
+	output: readonly CodemodeOutputItem[],
+	typedOutput: ReturnType<typeof trackCodemodeOutput>,
+): (TextContent | ImageContent)[] {
+	const total = output.filter((item) => item.type !== "image" && !(item.type === "text" && item.console)).length;
 	const items: (TextContent | ImageContent)[] = [];
 	const consoleLines: string[] = [];
 	let index = 0;
 	for (const item of output) {
 		if (item.type === "image") {
 			items.push(item);
-		} else if (item.console) {
+		} else if (item.type === "text" && item.console) {
 			consoleLines.push(item.text);
 		} else {
 			index++;
-			items.push({ type: "text", text: total > 1 ? `==> text ${index}/${total} <==\n${item.text}` : item.text });
+			const prefix = total > 1 ? `==> text ${index}/${total} <==\n` : "";
+			if (item.type === "json") {
+				if (prefix) items.push({ type: "text", text: prefix });
+				items.push(typedOutput.toContent(item));
+			} else {
+				items.push({ type: "text", text: `${prefix}${item.text}` });
+			}
 		}
 	}
 	if (consoleLines.length > 0) {
@@ -281,13 +291,30 @@ function formatOutput(output: readonly CodemodeOutputItem[]): (TextContent | Ima
 }
 
 /** Join adjacent text items into one, each part starting on its own line. */
-function joinAdjacentText(items: (TextContent | ImageContent)[]): (TextContent | ImageContent)[] {
+function joinAdjacentText(
+	items: (TextContent | ImageContent)[],
+	typedOutput: ReturnType<typeof trackCodemodeOutput>,
+): (TextContent | ImageContent)[] {
 	const joined: (TextContent | ImageContent)[] = [];
 	for (const item of items) {
 		const last = joined.at(-1);
-		if (item.type === "text" && last?.type === "text") {
+		// JSON blocks retain their identity so the tracker can recover their schema metadata.
+		if (
+			item.type === "text" &&
+			last?.type === "text" &&
+			!typedOutput.isStructured(item) &&
+			!typedOutput.isStructured(last)
+		) {
 			const separator = last.text === "" || last.text.endsWith("\n") ? "" : "\n";
 			joined[joined.length - 1] = { type: "text", text: `${last.text}${separator}${item.text}` };
+		} else if (
+			item.type === "text" &&
+			last?.type === "text" &&
+			typedOutput.isStructured(last) &&
+			!typedOutput.isStructured(item) &&
+			!item.text.startsWith("\n")
+		) {
+			joined.push({ ...item, text: `\n${item.text}` });
 		} else {
 			joined.push(item);
 		}
@@ -446,6 +473,7 @@ export async function executeCodemode(
 	);
 	const sandboxTools: CodemodeTool[] = callable.map((tool) => ({
 		name: tool.name,
+		outputSchema: toCodemodeDeclaration(tool).outputSchema,
 		description: samples.get(tool.name),
 		execute: async (args, { signal: callSignal }) => {
 			const record: CodemodeNestedCall = {
@@ -499,6 +527,7 @@ export async function executeCodemode(
 		if (call.status === "running") call.status = "cancelled";
 	}
 
+	const typedOutput = trackCodemodeOutput();
 	const scriptOutput = [...result.output];
 	if (result.ok) {
 		const { set, delete: deleted } = result.storeWrites;
@@ -506,9 +535,15 @@ export async function executeCodemode(
 			options.appendEntry?.(CODEMODE_STORE_ENTRY_TYPE, { set, delete: deleted });
 		}
 		// pi extension: a returned value is appended like text().
-		if (result.value !== undefined) scriptOutput.push({ type: "text", text: valueText(result.value) });
+		if (result.value !== undefined) {
+			scriptOutput.push(
+				typeof result.value === "string"
+					? { type: "text", text: result.value }
+					: { type: "json", text: valueText(result.value), schema: result.valueSchema },
+			);
+		}
 	}
-	const items = formatOutput(scriptOutput);
+	const items = formatOutput(scriptOutput, typedOutput);
 	if (!result.ok) items.push({ type: "text", text: `Script error:\n${formatError(result, calls)}` });
 	if (generatedImages > 0 && !items.some((item) => item.type === "image")) {
 		items.push({
@@ -518,18 +553,19 @@ export async function executeCodemode(
 	}
 
 	const truncated = await truncateOutput(
-		joinAdjacentText(items),
+		joinAdjacentText(items, typedOutput),
 		sourceOptions.maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS,
 	);
 	// After truncation, which joins the text items and moves images after them, so each path stays
 	// next to its image and is never cut.
-	const output = joinAdjacentText(await saveImages(truncated.items));
+	const output = joinAdjacentText(await saveImages(truncated.items), typedOutput);
 	const wallTime = ((performance.now() - startedAt) / 1000).toFixed(1);
 	const header = `${result.ok ? "Script completed" : "Script failed"}\nWall time ${wallTime} seconds\nOutput:\n`;
-	const details = snapshot();
+	const content: (TextContent | ImageContent)[] = [{ type: "text", text: header }, ...output];
+	const details = { ...snapshot(), ...typedOutput.collect(content) };
 	if (truncated.fullOutputPath) details.fullOutputPath = truncated.fullOutputPath;
 	return {
-		content: [{ type: "text", text: header }, ...output],
+		content,
 		details,
 		...(modelUsage ? { usage: modelUsage } : {}),
 		...(result.ok ? {} : { isError: true }),

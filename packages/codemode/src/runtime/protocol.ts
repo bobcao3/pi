@@ -29,16 +29,16 @@ export type ScriptErrorJson = string;
 
 export type WorkerToHostMessage =
 	| { type: "call"; id: number; target: "tool" | "global"; name: string; args: string | undefined }
-	| { type: "output"; item: CodemodeOutputItem }
+	| { type: "output"; item: CodemodeOutputItem; schema?: string }
 	/** `writes` is a JSON array of `[key, json]` for `store()` and `[key]` for deletions. */
-	| { type: "done"; ok: true; value: string | undefined; writes: string }
+	| { type: "done"; ok: true; value: string | undefined; writes: string; schema?: string }
 	| { type: "done"; ok: false; error: ScriptErrorJson }
 	/** The VM failed outside the script's control, for example a wasm trap. */
 	| { type: "crash"; message: string };
 
 export type HostToWorkerMessage =
 	/** `payload` is the JSON result when `ok`, otherwise the error message. */
-	{ type: "result"; id: number; ok: boolean; payload: string | undefined };
+	{ type: "result"; id: number; ok: boolean; payload: string | undefined; schema?: string };
 
 export function isWorkerToHostMessage(value: unknown): value is WorkerToHostMessage {
 	if (typeof value !== "object" || value === null) return false;

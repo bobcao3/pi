@@ -7,10 +7,10 @@
  * `exit`, `console`), and globals on top of it. Tool arguments and results cross
  * as JSON strings and are parsed on this side.
  *
- * Output helpers: `text(value)` appends a text item (non-strings are
- * JSON-stringified), `image(urlOrItem)` appends an image from a base64 `data:` URL, an
+ * Output helpers: `text(value)` appends a text or tagged JSON item,
+ * `image(urlOrItem)` appends an image from a base64 `data:` URL, an
  * `{ image_url }` object, or an MCP `ImageContent` block, and `exit()` ends the script
- * successfully. `console.*` appends text items marked as console output.
+ * successfully. `console.*` appends text marked as console output.
  *
  * `store(key, value)` and `load(key)` are synchronous: they work on a snapshot of
  * JSON text passed in as `storeJson`, and the keys the script wrote are reported
@@ -22,8 +22,8 @@
  * `stalled()` reports a script that has not finished while no host call is pending: with no timers
  * or I/O in the VM, nothing can ever resume it.
  * `globalsJson` lists `{ name, spread }`; `a.b` names are grouped into a frozen `a` object.
- * `bridge(kind, a, b, c)` with kind "call" or "global" (id, name, argsJson),
- * "output" ("text" or "console", text) or ("image", data, mimeType), or "done" (ok, valueJsonOrErrorJson, writesJson).
+ * `bridge(kind, a, b, c, d)` accepts "call" or "global" (id, name, argsJson),
+ * "output" ("text", "json", "console", or "image", textOrData, schemaOrMimeType), or "done" (ok, valueJsonOrErrorJson, writesJson, schema).
  *
  * Before anything else the prelude freezes the built-ins and makes the built-in globals read-only.
  * The prelude shares them with the script, so a script that patched one (for example
@@ -33,7 +33,7 @@ export const MAX_STORE_VALUE_CHARS = 256 * 1024;
 export const MAX_STORE_TOTAL_CHARS = 1024 * 1024;
 /**
  * Output one script may produce with `text()`, `image()`, and `console.*`: characters of text and
- * base64 image data, and items. The host keeps all output until the script ends, so without a
+ * base64 image data, schema metadata, and items. The host keeps all output until the script ends, so without a
  * limit a script that prints in a loop grows the host's memory until it crashes. The item limit
  * covers loops that print empty strings.
  */
@@ -142,15 +142,24 @@ export const PRELUDE_SOURCE: string = `(function (bridge, toolsJson, globalsJson
 	const TypeErrorCtor = TypeError;
 	const RangeErrorCtor = RangeError;
 	const pending = new Map();
+	const schemas = new WeakMap();
+	const getSchema = schemas.get.bind(schemas);
+	const setSchema = schemas.set.bind(schemas);
 	let nextId = 1;
 	let finished = false;
 	// Thrown by exit() to unwind the script after it already reported success.
 	const EXIT = Object.freeze({});
 
-	function done(ok, payload, writes) {
+	function done(ok, payload, writes, schema) {
 		if (finished) return;
 		finished = true;
-		bridge("done", ok, payload, writes);
+		bridge("done", ok, payload, writes, schema);
+	}
+
+	function outputSchema(value, json) {
+		if (value === null || typeof value !== "object") return undefined;
+		const original = getSchema(value);
+		return original && original.json === json ? original.schema : undefined;
 	}
 
 	function serialize(value) {
@@ -337,9 +346,9 @@ export const PRELUDE_SOURCE: string = `(function (bridge, toolsJson, globalsJson
 
 	// Past the output limits the script fails: done() reports the error, so catching it does not
 	// resume output, and the host ends the script.
-	function output(kind, data, mimeType) {
+	function output(kind, data, metadata) {
 		if (finished) return;
-		outputChars += data.length;
+		outputChars += data.length + (kind === "json" && metadata ? metadata.length : 0);
 		outputItems++;
 		if (outputChars > ${MAX_OUTPUT_CHARS} || outputItems > ${MAX_OUTPUT_ITEMS}) {
 			const error = new RangeErrorCtor(
@@ -349,16 +358,19 @@ export const PRELUDE_SOURCE: string = `(function (bridge, toolsJson, globalsJson
 			done(false, describeError(error));
 			throw error;
 		}
-		bridge("output", kind, data, mimeType);
+		bridge("output", kind, data, metadata);
 	}
 
 	// Primitives become their string form, everything else JSON.
 	function outputText(value) {
+		if (value === null || typeof value === "boolean" || typeof value === "number" && Number.isFinite(value)) {
+			return ["json", String(value)];
+		}
 		if (value === undefined || value === null || typeof value !== "object" && typeof value !== "function") {
-			return String(value);
+			return ["text", String(value)];
 		}
 		const json = stringify(value);
-		return json === undefined ? String(value) : json;
+		return json === undefined ? ["text", String(value)] : ["json", json];
 	}
 
 	function text(value) {
@@ -368,7 +380,7 @@ export const PRELUDE_SOURCE: string = `(function (bridge, toolsJson, globalsJson
 		} catch (error) {
 			throw new TypeErrorCtor(error instanceof ErrorCtor ? error.message : String(error));
 		}
-		output("text", rendered);
+		output(rendered[0], rendered[1], outputSchema(value, rendered[1]));
 	}
 
 	function imageUrl(value) {
@@ -454,7 +466,7 @@ export const PRELUDE_SOURCE: string = `(function (bridge, toolsJson, globalsJson
 	Object.defineProperty(globalThis, "exit", { value: exit, enumerable: true });
 
 	return {
-		settle(id, ok, payload) {
+		settle(id, ok, payload, schema) {
 			const entry = pending.get(id);
 			if (!entry) return;
 			pending.delete(id);
@@ -468,6 +480,9 @@ export const PRELUDE_SOURCE: string = `(function (bridge, toolsJson, globalsJson
 			} catch (error) {
 				entry.reject(error);
 				return;
+			}
+			if (schema !== undefined && value !== null && typeof value === "object") {
+				setSchema(value, { json: payload, schema });
 			}
 			entry.resolve(value);
 		},
@@ -489,7 +504,7 @@ export const PRELUDE_SOURCE: string = `(function (bridge, toolsJson, globalsJson
 						done(false, describeError(error));
 						return;
 					}
-					done(true, json, serializeWrites());
+					done(true, json, serializeWrites(), outputSchema(value, json));
 				},
 				(error) => {
 					done(false, describeError(error));

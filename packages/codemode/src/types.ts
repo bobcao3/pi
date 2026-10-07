@@ -8,7 +8,7 @@ export interface CodemodeToolContext {
 	signal: AbortSignal;
 }
 
-/** A JSON Schema document. Only used to render declarations; values are not validated against it. */
+/** Declarations and output records retain schemas without validating values against them. */
 export type CodemodeJsonSchema = { [key: string]: unknown } | boolean;
 
 export interface CodemodeTool {
@@ -41,11 +41,13 @@ export interface CodemodeTool {
 }
 
 /**
- * One item of the script's output, in the order the script produced it: `text()` and `console.*`
- * produce text items, with `console: true` for `console.*`, and `image()` image items. `data` is base64.
+ * `text()` distinguishes JSON values from strings; console methods produce text marked
+ * `console: true`. JSON records retain the tool schema only when the script emits an unchanged
+ * object result. Image data is base64.
  */
 export type CodemodeOutputItem =
 	| { type: "text"; text: string; console?: true }
+	| { type: "json"; text: string; schema?: CodemodeJsonSchema }
 	| { type: "image"; data: string; mimeType: string };
 
 export type CodemodeCallStatus = "ok" | "error" | "cancelled";
@@ -85,6 +87,7 @@ export type CodemodeResult =
 	| {
 			ok: true;
 			value: unknown;
+			valueSchema?: CodemodeJsonSchema;
 			output: CodemodeOutputItem[];
 			calls: CodemodeCall[];
 			storeWrites: CodemodeStoreWrites;

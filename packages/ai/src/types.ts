@@ -611,6 +611,8 @@ export type ToolResultMessage<TDetails = JsonValue> = IsJsonCompatible<TDetails>
 			toolName: string;
 			content: (TextContent | ImageContent)[]; // Supports text and images
 			details?: JsonRepresentation<TDetails>;
+			/** Renderers and programmatic consumers use this value; providers send only content. */
+			structuredContent?: JsonValue;
 			/** Usage from the tool execution itself, if available. Not part of main LLM context accounting. */
 			usage?: Usage;
 			/** Calls this tool made to other tools. Kept for the session record; not sent to the model. */
