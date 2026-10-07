@@ -59,6 +59,7 @@
 		"@biomejs/biome": "2.3.5",
 		"@types/node": "22.19.19",
 		"esbuild": "0.28.2",
+		"es-module-lexer": "2.3.1",
 		"husky": "9.1.7",
 		"pnpm": "11.15.1",
 		"shx": "0.3.4",

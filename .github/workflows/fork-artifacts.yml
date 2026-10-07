@@ -1,0 +1,55 @@
+name: Fork artifacts
+
+on:
+  push:
+    branches: ["cpi-fork"]
+    tags: ["cpi-*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fork-artifacts-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  artifacts:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.0"
+      - name: Install reviewed dependencies
+        run: npm ci --ignore-scripts
+      - name: Check package dependency boundaries
+        run: |
+          npm run check:pinned-deps
+          npm run check:runtime-deps
+          npm run check:ts-imports
+          npm run check:entry-graphs
+          npm run check:install-lock:coding-agent
+      - name: Produce versioned fork packages
+        env:
+          ARTIFACT_DIRECTORY: ${{ runner.temp }}/pi-artifacts
+        run: |
+          version=$(node -p 'require("./packages/coding-agent/package.json").version')
+          upstream=$(node -p 'require("./fork.json").upstreamRevision')
+          node scripts/produce-artifacts.mjs "$ARTIFACT_DIRECTORY" "$version-cpi.$GITHUB_RUN_ID" "$upstream"
+      - name: Test installed SDK and CLI with npm and Bun
+        run: node scripts/verify-fork-artifacts.mjs "${{ runner.temp }}/pi-artifacts"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pi-fork-packages
+          path: |
+            ${{ runner.temp }}/pi-artifacts/*.tgz
+            ${{ runner.temp }}/pi-artifacts/manifest.json
+            ${{ runner.temp }}/pi-artifacts/verification.json
+          if-no-files-found: error
+          retention-days: 14

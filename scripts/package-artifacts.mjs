@@ -30,7 +30,7 @@ function packPackages(packages, tarballDirectory) {
 			encoding: "utf8",
 			stdio: ["inherit", "pipe", "inherit"],
 		});
-		const parsed = JSON.parse(output);
+		const parsed = Object.values(JSON.parse(output));
 		if (!Array.isArray(parsed) || parsed.length !== 1 || !parsed[0]?.filename) {
 			throw new Error(`npm pack returned an unexpected result for ${pkg.name}`);
 		}
