@@ -15,6 +15,14 @@ const checkout = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const [destinationArg, version, upstreamRevision] = process.argv.slice(2);
 assert(destinationArg && /^\d+\.\d+\.\d+-[\w.-]+$/.test(version) && /^[a-f0-9]{40}$/.test(upstreamRevision ?? ""),
 	"Usage: node scripts/produce-artifacts.mjs NEW_DESTINATION VERSION UPSTREAM_REVISION");
+const forkConfig = JSON.parse(await readFile(join(checkout, "fork.json"), "utf8"));
+assert.equal(forkConfig.upstreamRevision, upstreamRevision, "fork.json upstreamRevision does not match");
+assert(typeof forkConfig.upstreamVersion === "string" && /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(forkConfig.upstreamVersion),
+	"fork.json upstreamVersion must be an exact stable semver");
+assert(Array.isArray(forkConfig.redistributedPackages) && forkConfig.redistributedPackages.every(name => typeof name === "string"),
+	"fork.json redistributedPackages must be an array of package names");
+assert.equal(new Set(forkConfig.redistributedPackages).size, forkConfig.redistributedPackages.length,
+	"fork.json redistributedPackages must be unique");
 const destination = resolve(destinationArg);
 assert(!destination.startsWith(`${checkout}/`), "Artifacts must be outside the checkout");
 await assert.rejects(lstat(destination), { code: "ENOENT" });
@@ -26,19 +34,26 @@ const snapshot = await prepareReleaseSources(checkout, dirname(destination));
 const sha256 = bytes => createHash("sha256").update(bytes).digest("hex");
 const save = (path, data) => writeFile(path, `${JSON.stringify(data, null, 2)}\n`);
 try {
-	const selected = [];
+	const workspaces = [];
 	for (const entry of await readdir(join(snapshot.root, "packages"), { withFileTypes: true })) {
 		if (!entry.isDirectory()) continue;
 		const folder = join(snapshot.root, "packages", entry.name);
 		let manifest;
 		try { manifest = JSON.parse(await readFile(join(folder, "package.json"), "utf8")); }
 		catch (error) { if (error.code === "ENOENT") continue; throw error; }
-		if (!manifest.private) selected.push({ folder, original: entry.name, manifest });
+		if (!manifest.private) workspaces.push({ folder, original: entry.name, manifest });
 	}
-	const names = new Set(selected.map(({ manifest }) => manifest.name));
+	const workspacesByName = new Map(workspaces.map(workspace => [workspace.manifest.name, workspace]));
+	const names = new Set(workspacesByName.keys());
+	const selected = forkConfig.redistributedPackages.map(name => {
+		assert(workspacesByName.has(name), `Configured redistributed package does not exist: ${name}`);
+		return workspacesByName.get(name);
+	});
+	const selectedNames = new Set(forkConfig.redistributedPackages);
 	await init;
 	const declarations = await emitDeclarations(snapshot.root, selected);
 	const artifacts = [];
+	const upstreamPackages = {};
 	for (const workspace of selected) {
 		const staged = join(destination, "staging", workspace.original);
 		await mkdir(staged, { recursive: true });
@@ -54,7 +69,13 @@ try {
 		manifest.version = version;
 		for (const key of ["exports", "main", "module", "bin", "pi"]) if (manifest[key]) manifest[key] = manifestPaths(manifest[key]);
 		for (const field of ["dependencies", "optionalDependencies", "peerDependencies"]) {
-			for (const name of Object.keys(manifest[field] ?? {})) if (names.has(name)) manifest[field][name] = version;
+			for (const name of Object.keys(manifest[field] ?? {})) if (names.has(name)) {
+				if (selectedNames.has(name)) manifest[field][name] = version;
+				else {
+					manifest[field][name] = forkConfig.upstreamVersion;
+					upstreamPackages[name] = forkConfig.upstreamVersion;
+				}
+			}
 		}
 		await save(join(staged, "package.json"), manifest);
 		try { await lstat(join(staged, "LICENSE")); }
@@ -74,7 +95,8 @@ try {
 		console.log(`${manifest.name}@${version}: ${filename}`);
 	}
 	await save(join(destination, "manifest.json"), {
-		format: 1, upstreamRevision, forkRevision: fallback.stdout.trim(), version,
+		format: 1, upstreamRevision, upstreamVersion: forkConfig.upstreamVersion,
+		upstreamPackages, forkRevision: fallback.stdout.trim(), version,
 		rootLockSha256: sha256(await readFile(join(checkout, "package-lock.json"))),
 		modelCatalogRevision: snapshot.modelCatalogRevision, modelsSha256: sha256(await readFile(join(snapshot.root, "packages/ai/src/models.generated.ts"))),
 		node: process.version, esbuild, typescript: JSON.parse(await readFile(join(checkout, "node_modules/typescript/package.json"), "utf8")).version,
