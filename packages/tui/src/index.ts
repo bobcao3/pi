@@ -68,14 +68,6 @@ export {
 export { type SettingItem, SettingsList, type SettingsListTheme } from "./components/settings-list.ts";
 export { Spacer } from "./components/spacer.ts";
 export { Text } from "./components/text.ts";
-export {
-	type TreeNode,
-	type TreeState,
-	type TreeStatus,
-	TreeView,
-	type TreeViewOptions,
-	type TreeViewTheme,
-} from "./components/tree-view.ts";
 export { TruncatedText } from "./components/truncated-text.ts";
 export {
 	type StackChild,
@@ -155,6 +147,7 @@ export {
 	type ImageProtocol,
 	type ImageRenderOptions,
 	imageFallback,
+	isImageLine,
 	renderImage,
 	resetCapabilitiesCache,
 	setCapabilities,

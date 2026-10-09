@@ -1,147 +1,77 @@
-import * as Diff from "diff";
-import { theme } from "../theme/theme.ts";
-
-/**
- * Parse diff line to extract prefix, line number, and content.
- * Format: "+123 content" or "-123 content" or " 123 content" or "     ..."
- */
-function parseDiffLine(line: string): { prefix: string; lineNum: string; content: string } | null {
-	const match = line.match(/^([+-\s])(\s*\d*)\s(.*)$/);
-	if (!match) return null;
-	return { prefix: match[1], lineNum: match[2], content: match[3] };
-}
-
-/**
- * Replace tabs with spaces for consistent rendering.
- */
-function replaceTabs(text: string): string {
-	return text.replace(/\t/g, "   ");
-}
-
-/**
- * Compute word-level diff and render with inverse on changed parts.
- * Uses diffWords which groups whitespace with adjacent words for cleaner highlighting.
- * Strips leading whitespace from inverse to avoid highlighting indentation.
- */
-function renderIntraLineDiff(oldContent: string, newContent: string): { removedLine: string; addedLine: string } {
-	const wordDiff = Diff.diffWords(oldContent, newContent);
-
-	let removedLine = "";
-	let addedLine = "";
-	let isFirstRemoved = true;
-	let isFirstAdded = true;
-
-	for (const part of wordDiff) {
-		if (part.removed) {
-			let value = part.value;
-			// Strip leading whitespace from the first removed part
-			if (isFirstRemoved) {
-				const leadingWs = value.match(/^(\s*)/)?.[1] || "";
-				value = value.slice(leadingWs.length);
-				removedLine += leadingWs;
-				isFirstRemoved = false;
-			}
-			if (value) {
-				removedLine += theme.inverse(value);
-			}
-		} else if (part.added) {
-			let value = part.value;
-			// Strip leading whitespace from the first added part
-			if (isFirstAdded) {
-				const leadingWs = value.match(/^(\s*)/)?.[1] || "";
-				value = value.slice(leadingWs.length);
-				addedLine += leadingWs;
-				isFirstAdded = false;
-			}
-			if (value) {
-				addedLine += theme.inverse(value);
-			}
-		} else {
-			removedLine += part.value;
-			addedLine += part.value;
-		}
-	}
-
-	return { removedLine, addedLine };
-}
+import { theme as activeTheme, getLanguageFromPath, type Theme } from "../theme/theme.ts";
+import { type DiffLine, highlightChangedWords, highlightDiffLines } from "./diff-syntax.ts";
 
 export interface RenderDiffOptions {
-	/** File path (unused, kept for API compatibility) */
 	filePath?: string;
+	language?: string;
+	theme?: Theme;
+	lineNumbers?: boolean | number;
 }
 
-/**
- * Render a diff string with colored lines and intra-line change highlighting.
- * - Context lines: dim/gray
- * - Removed lines: red, with inverse on changed tokens
- * - Added lines: green, with inverse on changed tokens
- */
-export function renderDiff(diffText: string, _options: RenderDiffOptions = {}): string {
+function parseDiffLine(line: string, lineNumbers: boolean | number = true): DiffLine | null {
+	if (
+		/^(---(?: |$)|\+\+\+(?: |$)|@@|diff |index )/.test(line) ||
+		line.startsWith("\\") ||
+		/^[ \t]*(\.{3}|…)$/.test(line)
+	) {
+		return null;
+	}
+	const first = line[0];
+	if (first !== "+" && first !== "-" && first !== " ") return null;
+	if (typeof lineNumbers === "number") {
+		return { prefix: first, lineNum: line.slice(1, lineNumbers - 1), content: line.slice(lineNumbers) };
+	}
+	if (lineNumbers !== false) {
+		const match = line.match(/^([+\- ])(\s*\d+) (.*)$/);
+		if (match) return { prefix: match[1], lineNum: match[2], content: match[3] };
+	}
+	return { prefix: first, lineNum: "", content: line.slice(1) };
+}
+
+function changedLine(row: DiffLine, body: string, theme: Theme): string {
+	const color = row.prefix === "-" ? "toolDiffRemoved" : "toolDiffAdded";
+	const prefix = `${row.prefix}${row.lineNum}${row.lineNum ? " " : ""}`;
+	return theme.style(prefix, { fg: color, dim: true }) + body;
+}
+
+/** Render a diff with grammar-preserving syntax and changed-word highlighting. */
+export function renderDiff(diffText: string, options: RenderDiffOptions = {}): string {
+	if (
+		typeof options.lineNumbers === "number" &&
+		(!Number.isInteger(options.lineNumbers) || options.lineNumbers < 2 || options.lineNumbers > 100)
+	) {
+		throw new Error("Diff gutter width must be an integer between 2 and 100");
+	}
 	const lines = diffText.split("\n");
-	const result: string[] = [];
+	const theme = options.theme ?? activeTheme;
+	const rows = lines.map((line) => parseDiffLine(line.replace(/\t/g, "   "), options.lineNumbers));
+	const syntax = highlightDiffLines(
+		rows,
+		options.language ?? (options.filePath ? getLanguageFromPath(options.filePath) : undefined),
+		theme,
+	);
+	const result = lines.map((line, i) => {
+		const row = rows[i];
+		if (!row) return theme.fg("toolDiffContext", line.replace(/\t/g, "   "));
+		return row.prefix === " "
+			? theme.fg("toolDiffContext", line.replace(/\t/g, "   "))
+			: changedLine(row, syntax[i], theme);
+	});
 
-	let i = 0;
-	while (i < lines.length) {
-		const line = lines[i];
-		const parsed = parseDiffLine(line);
-
-		if (!parsed) {
-			result.push(theme.fg("toolDiffContext", line));
-			i++;
-			continue;
-		}
-
-		if (parsed.prefix === "-") {
-			// Collect consecutive removed lines
-			const removedLines: { lineNum: string; content: string }[] = [];
-			while (i < lines.length) {
-				const p = parseDiffLine(lines[i]);
-				if (!p || p.prefix !== "-") break;
-				removedLines.push({ lineNum: p.lineNum, content: p.content });
-				i++;
-			}
-
-			// Collect consecutive added lines
-			const addedLines: { lineNum: string; content: string }[] = [];
-			while (i < lines.length) {
-				const p = parseDiffLine(lines[i]);
-				if (!p || p.prefix !== "+") break;
-				addedLines.push({ lineNum: p.lineNum, content: p.content });
-				i++;
-			}
-
-			// Only do intra-line diffing when there's exactly one removed and one added line
-			// (indicating a single line modification). Otherwise, show lines as-is.
-			if (removedLines.length === 1 && addedLines.length === 1) {
-				const removed = removedLines[0];
-				const added = addedLines[0];
-
-				const { removedLine, addedLine } = renderIntraLineDiff(
-					replaceTabs(removed.content),
-					replaceTabs(added.content),
-				);
-
-				result.push(theme.fg("toolDiffRemoved", `-${removed.lineNum} ${removedLine}`));
-				result.push(theme.fg("toolDiffAdded", `+${added.lineNum} ${addedLine}`));
-			} else {
-				// Show all removed lines first, then all added lines
-				for (const removed of removedLines) {
-					result.push(theme.fg("toolDiffRemoved", `-${removed.lineNum} ${replaceTabs(removed.content)}`));
-				}
-				for (const added of addedLines) {
-					result.push(theme.fg("toolDiffAdded", `+${added.lineNum} ${replaceTabs(added.content)}`));
-				}
-			}
-		} else if (parsed.prefix === "+") {
-			// Standalone added line
-			result.push(theme.fg("toolDiffAdded", `+${parsed.lineNum} ${replaceTabs(parsed.content)}`));
-			i++;
-		} else {
-			// Context line
-			result.push(theme.fg("toolDiffContext", ` ${parsed.lineNum} ${replaceTabs(parsed.content)}`));
+	for (let i = 0; i < rows.length - 1; i++) {
+		if (
+			rows[i]?.prefix === "-" &&
+			rows[i + 1]?.prefix === "+" &&
+			rows[i - 1]?.prefix !== "-" &&
+			rows[i + 2]?.prefix !== "+"
+		) {
+			const removed = rows[i]!;
+			const added = rows[i + 1]!;
+			const changed = highlightChangedWords(removed.content, added.content, syntax[i], syntax[i + 1]);
+			result[i] = changedLine(removed, changed[0], theme);
+			result[i + 1] = changedLine(added, changed[1], theme);
 			i++;
 		}
 	}
-
 	return result.join("\n");
 }

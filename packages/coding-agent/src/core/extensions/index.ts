@@ -176,10 +176,14 @@ export type {
 	ToolCallEventResult,
 	// Tools
 	ToolDefinition,
+	ToolExecutionBatchCall,
 	// Events - Tool Execution
 	ToolExecutionEndEvent,
 	// Tool execution mode
 	ToolExecutionMode,
+	ToolExecutionNestedCall,
+	ToolExecutionRenderContext,
+	ToolExecutionSnapshot,
 	ToolExecutionStartEvent,
 	ToolExecutionUpdateEvent,
 	ToolExposure,
@@ -192,13 +196,7 @@ export type {
 	ToolRenderResultOptions,
 	ToolResultEvent,
 	ToolResultEventResult,
-	ToolTreeContent,
-	ToolTreeContext,
-	ToolTreeNode,
-	ToolTreeSnapshot,
 	TreePreparation,
-	TreeState,
-	TreeStatus,
 	TurnEndEvent,
 	TurnEndEventResult,
 	TurnStartEvent,

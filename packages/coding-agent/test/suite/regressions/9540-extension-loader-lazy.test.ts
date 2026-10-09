@@ -50,7 +50,7 @@ describe("extension loader lazy imports", () => {
 		expect(state.createJiti).toHaveBeenCalledOnce();
 
 		const options = state.createJiti.mock.calls[0][1] as JitiOptionsProbe;
-		expect(options.tryNative).toBeUndefined();
+		expect(options.tryNative).toBe(false);
 		expect(options.tsconfigPaths).toBe(true);
 		expect(options.alias).toBeUndefined();
 		expect(options.virtualModules).toBeDefined();

@@ -82,11 +82,7 @@ import type { Settings } from "../settings-manager.ts";
 import type { SlashCommandInfo } from "../slash-commands.ts";
 import type { SourceInfo } from "../source-info.ts";
 import type { BuildSystemPromptOptions, NormalizedBuildSystemPromptOptions } from "../system-prompt.ts";
-import type {
-	ToolTreeContext as ToolTreeContextType,
-	ToolTreeNode as ToolTreeNodeType,
-	ToolTreeSnapshot as ToolTreeSnapshotType,
-} from "../tool-tree.ts";
+import type { ToolExecutionBatchCall, ToolExecutionRenderContext, ToolExecutionSnapshot } from "../tool-execution.ts";
 import type { BashOperations } from "../tools/bash.ts";
 import type { EditToolDetails } from "../tools/edit.ts";
 import type {
@@ -112,13 +108,11 @@ export type { BuildSystemPromptOptions, NormalizedBuildSystemPromptOptions } fro
 export type { AgentToolResult, AgentToolUpdateCallback, ToolExecutionMode };
 export type { AppKeybinding, KeybindingsManager } from "../keybindings.ts";
 export type {
-	ToolTreeContent,
-	ToolTreeContext,
-	ToolTreeNode,
-	ToolTreeSnapshot,
-	TreeState,
-	TreeStatus,
-} from "../tool-tree.ts";
+	ToolExecutionBatchCall,
+	ToolExecutionNestedCall,
+	ToolExecutionRenderContext,
+	ToolExecutionSnapshot,
+} from "../tool-execution.ts";
 
 // ============================================================================
 // UI Context
@@ -673,17 +667,41 @@ export interface ToolDefinition<TParams extends TSchema = TSchema, TDetails = un
 		context: ToolRenderContext<TState, Static<TParams>>,
 	) => Component;
 
-	/** Semantic tree rendering for interactive display and HTML export. */
-	renderTree?: (
-		snapshot: ToolTreeSnapshotType<Static<TParams>, TDetails>,
+	/** Full execution rendering, owning framing, images and input. Reuse context.lastComponent; dispose is called on replacement/removal. */
+	renderExecution?: (
+		snapshot: ToolExecutionSnapshot<Static<TParams>, TDetails>,
 		theme: Theme,
-		context: ToolTreeContextType<TState>,
-	) => readonly ToolTreeNodeType[];
+		context: ToolExecutionRenderContext<TState>,
+	) => Component;
+	renderBatchExecution?: (
+		calls: readonly ToolExecutionBatchCall[],
+		theme: Theme,
+		context: ToolExecutionRenderContext<TState>,
+	) => Component;
+	renderExecutionHtml?: (
+		snapshot: ToolExecutionSnapshot<Static<TParams>, TDetails>,
+		theme: Theme,
+		context: ToolExecutionRenderContext<TState>,
+	) => string;
 }
 
 type AnyToolDefinition = ToolDefinition<any, any, any>;
 
-export type ToolRenderers = Pick<AnyToolDefinition, "renderShell" | "renderCall" | "renderResult" | "renderTree">;
+export type ToolRenderers = Pick<
+	AnyToolDefinition,
+	"renderShell" | "renderCall" | "renderResult" | "renderBatchExecution"
+> & {
+	renderExecution?: (
+		snapshot: ToolExecutionSnapshot<any, any>,
+		theme: Theme,
+		context: ToolExecutionRenderContext<any>,
+	) => Component;
+	renderExecutionHtml?: (
+		snapshot: ToolExecutionSnapshot<any, any>,
+		theme: Theme,
+		context: ToolExecutionRenderContext<any>,
+	) => string;
+};
 
 /**
  * Chooses how calls to a tool are drawn, including tools that are not registered. `next()` returns
@@ -1806,6 +1824,12 @@ export interface ExtensionAPI {
 	 */
 	setThinkingLevel(level: ThinkingLevel): void;
 
+	/** Persist the default model for new sessions. */
+	setDefaultModel(provider: string, modelId: string): void;
+
+	/** Persist the default thinking level for new sessions. */
+	setDefaultThinkingLevel(level: ThinkingLevel): void;
+
 	// =========================================================================
 	// Provider Registration
 	// =========================================================================
@@ -2151,6 +2175,10 @@ export type GetThinkingLevelHandler = () => ThinkingLevel;
 
 export type SetThinkingLevelHandler = (level: ThinkingLevel) => void;
 
+export type SetDefaultModelHandler = (provider: string, modelId: string) => void;
+
+export type SetDefaultThinkingLevelHandler = (level: ThinkingLevel) => void;
+
 export type SetLabelHandler = (entryId: string, label: string | undefined) => void;
 
 /**
@@ -2209,6 +2237,8 @@ export interface ExtensionActions {
 	setModel: SetModelHandler;
 	getThinkingLevel: GetThinkingLevelHandler;
 	setThinkingLevel: SetThinkingLevelHandler;
+	setDefaultModel: SetDefaultModelHandler;
+	setDefaultThinkingLevel: SetDefaultThinkingLevelHandler;
 }
 
 /**

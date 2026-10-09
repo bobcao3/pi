@@ -3433,6 +3433,12 @@ export class AgentSession {
 				},
 				getThinkingLevel: () => this.thinkingLevel,
 				setThinkingLevel: (level) => this.setThinkingLevel(level),
+				setDefaultModel: (provider, modelId) => {
+					this.settingsManager.setDefaultModelAndProvider(provider, modelId);
+				},
+				setDefaultThinkingLevel: (level) => {
+					this.settingsManager.setDefaultThinkingLevel(level);
+				},
 			},
 			{
 				getModel: () => this.model,

@@ -184,6 +184,8 @@ export function createExtensionRuntime(): ExtensionRuntime {
 		setModel: () => Promise.reject(new Error("Extension runtime not initialized")),
 		getThinkingLevel: notInitialized,
 		setThinkingLevel: notInitialized,
+		setDefaultModel: notInitialized,
+		setDefaultThinkingLevel: notInitialized,
 		flagValues: new Map(),
 		pendingProviderRegistrations: [],
 		pendingNativeProviderRegistrations: [],
@@ -459,6 +461,16 @@ function createExtensionAPI(
 			runtime.setThinkingLevel(level);
 		},
 
+		setDefaultModel(provider, modelId) {
+			assertActive();
+			runtime.setDefaultModel(provider, modelId);
+		},
+
+		setDefaultThinkingLevel(level) {
+			assertActive();
+			runtime.setDefaultThinkingLevel(level);
+		},
+
 		registerProvider(providerOrName: Provider | string, config?: ProviderConfig) {
 			assertActive();
 			if (typeof providerOrName === "string") {
@@ -577,7 +589,7 @@ async function loadExtensionModule(extensionPath: string, cacheToken?: Extension
 	const resolutionOptions = usesEmbeddedModules
 		? { virtualModules: await getVirtualModules(), tryNative: false }
 		: isTypeScriptSourceRuntime
-			? { virtualModules: await getVirtualModules(), tsconfigPaths: true }
+			? { virtualModules: await getVirtualModules(), tsconfigPaths: true, tryNative: false }
 			: { alias: getAliases() };
 	const jiti = createJitiImpl(import.meta.url, {
 		moduleCache: false,

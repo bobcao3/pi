@@ -171,8 +171,12 @@ export type {
 	ToolCallEvent,
 	ToolCallEventResult,
 	ToolDefinition,
+	ToolExecutionBatchCall,
 	ToolExecutionEndEvent,
 	ToolExecutionMode,
+	ToolExecutionNestedCall,
+	ToolExecutionRenderContext,
+	ToolExecutionSnapshot,
 	ToolExecutionStartEvent,
 	ToolExecutionUpdateEvent,
 	ToolExposure,
@@ -185,12 +189,6 @@ export type {
 	ToolRenderResultOptions,
 	ToolResultEvent,
 	ToolResultEventResult,
-	ToolTreeContent,
-	ToolTreeContext,
-	ToolTreeNode,
-	ToolTreeSnapshot,
-	TreeState,
-	TreeStatus,
 	TurnEndEvent,
 	TurnEndEventResult,
 	TurnStartEvent,
@@ -337,7 +335,6 @@ export {
 	type SkillFrontmatter,
 } from "./core/skills.ts";
 export { createSyntheticSourceInfo } from "./core/source-info.ts";
-export { createTreeState, ToolTreeComponent } from "./core/tool-tree.ts";
 export { type EditDiffResult, generateDiffString, generateUnifiedPatch } from "./core/tools/edit-diff.ts";
 // Tools
 export {
@@ -484,12 +481,6 @@ export {
 	type VisualTruncateResult,
 } from "./modes/interactive/components/index.ts";
 // UI components for extensions
-export {
-	ObjectTreeComponent,
-	type ObjectTreeOptions,
-	type ObjectTreeState,
-	parseTreeOutput,
-} from "./modes/interactive/components/object-tree.ts";
 // Theme utilities for custom tools and extensions
 export {
 	getLanguageFromPath,

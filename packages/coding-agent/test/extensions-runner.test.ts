@@ -96,6 +96,8 @@ describe("ExtensionRunner", () => {
 		setModel: async () => false,
 		getThinkingLevel: () => "off",
 		setThinkingLevel: () => {},
+		setDefaultModel: () => {},
+		setDefaultThinkingLevel: () => {},
 	};
 
 	const extensionContextActions: ExtensionContextActions = {

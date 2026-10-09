@@ -41,13 +41,6 @@ export interface Keybindings {
 	"tui.select.pageDown": true;
 	"tui.select.confirm": true;
 	"tui.select.cancel": true;
-	// Tree navigation
-	"tui.tree.up": true;
-	"tui.tree.down": true;
-	"tui.tree.open": true;
-	"tui.tree.close": true;
-	"tui.tree.toggle": true;
-	"tui.tree.cancel": true;
 	// Alternate-screen viewport navigation
 	"tui.altScreen.pageUp": true;
 	"tui.altScreen.pageDown": true;
@@ -162,15 +155,6 @@ export const TUI_KEYBINDINGS = {
 	"tui.select.cancel": {
 		defaultKeys: ["escape", "ctrl+c"],
 		description: "Cancel selection",
-	},
-	"tui.tree.up": { defaultKeys: "up", description: "Move tree selection up" },
-	"tui.tree.down": { defaultKeys: "down", description: "Move tree selection down" },
-	"tui.tree.open": { defaultKeys: "right", description: "Open selected tree row" },
-	"tui.tree.close": { defaultKeys: "left", description: "Close selected tree row" },
-	"tui.tree.toggle": { defaultKeys: "enter", description: "Toggle selected tree row" },
-	"tui.tree.cancel": {
-		defaultKeys: ["escape", "ctrl+c"],
-		description: "Cancel tree interaction",
 	},
 	// These intentionally shadow the unmodified editor bindings in fullscreen mode.
 	"tui.altScreen.pageUp": {

@@ -28,6 +28,7 @@ import type { SourceInfo } from "../../../core/source-info.ts";
 import { closeWatcher, watchWithErrorHandler } from "../../../utils/fs-watch.ts";
 import { highlight, supportsLanguage } from "../../../utils/syntax-highlight.ts";
 import { stripBom } from "../../../utils/text.ts";
+import { type DiffTone, diffHighlightTheme } from "./diff-highlight.ts";
 import { generateSystemThemeColors, SYSTEM_THEME_NAME, terminalAppearance } from "./system-theme.ts";
 
 export { SYSTEM_THEME_NAME } from "./system-theme.ts";
@@ -1001,24 +1002,28 @@ function getCliHighlightTheme(t: Theme): CliHighlightTheme {
  * Highlight code with syntax coloring based on file extension or language.
  * Returns array of highlighted lines.
  */
-export function highlightCode(code: string, lang?: string): string[] {
+export function highlightCode(code: string, lang?: string, options: { theme?: Theme; diff?: DiffTone } = {}): string[] {
+	const activeTheme = options.theme ?? theme;
+	const syntaxTheme = options.diff ? diffHighlightTheme(activeTheme, options.diff) : getCliHighlightTheme(activeTheme);
 	// Validate language before highlighting to avoid stderr spam from cli-highlight
 	const validLang = lang && supportsLanguage(lang) ? lang : undefined;
 	// Skip highlighting when no valid language is specified. cli-highlight's
 	// auto-detection is unreliable and can misidentify prose as AppleScript,
 	// LiveCodeServer, etc., coloring random English words as keywords.
-	if (!validLang) {
-		return code.split("\n").map((line) => theme.fg("mdCodeBlock", line));
+	if (!validLang || (options.diff && code.length > 200_000)) {
+		return code
+			.split("\n")
+			.map((line) => (options.diff ? (syntaxTheme.default?.(line) ?? line) : activeTheme.fg("mdCodeBlock", line)));
 	}
 	const opts = {
 		language: validLang,
 		ignoreIllegals: true,
-		theme: getCliHighlightTheme(theme),
+		theme: syntaxTheme,
 	};
 	try {
 		return highlight(code, opts).split("\n");
 	} catch {
-		return code.split("\n");
+		return options.diff ? code.split("\n").map((line) => syntaxTheme.default?.(line) ?? line) : code.split("\n");
 	}
 }
 
