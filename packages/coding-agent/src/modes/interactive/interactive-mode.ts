@@ -1997,6 +1997,7 @@ export class InteractiveMode {
 			},
 			commandContextActions: {
 				waitForIdle: () => this.session.waitForIdle(),
+				runCommand: (text) => this.runCommand(text),
 				newSession: async (options) => {
 					this.clearStatusIndicator();
 					try {
@@ -3214,6 +3215,15 @@ export class InteractiveMode {
 	private handleStartupSubmit(text: string): void {
 		this.editor.setText(text);
 		this.showStatus("Startup is still in progress");
+	}
+
+	/** Backs `pi.runCommand()`. Routes through the editor submit handler so built-in slash commands behave as typed. */
+	private async runCommand(text: string): Promise<boolean> {
+		if (!text.startsWith("/")) return false;
+		const submit = this.defaultEditor.onSubmit;
+		if (!submit) return false;
+		await (submit(text) as unknown as Promise<void>);
+		return true;
 	}
 
 	private setupEditorSubmitHandler(): void {

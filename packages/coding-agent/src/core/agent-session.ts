@@ -3425,6 +3425,7 @@ export class AgentSession {
 				setActiveTools: (toolNames) => this.setActiveToolsByName(toolNames),
 				refreshTools: () => this._refreshToolRegistry(),
 				getCommands,
+				runCommand: (text) => this._extensionCommandContextActions?.runCommand?.(text) ?? Promise.resolve(false),
 				setModel: async (model) => {
 					if (!this._modelRuntime.hasConfiguredAuth(model.provider)) return false;
 					await this.setModel(model);

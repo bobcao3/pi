@@ -12,14 +12,15 @@ import {
 	type TuiMouseEvent,
 } from "@earendil-works/pi-tui";
 import type { ToolDefinition, ToolRenderContext, ToolRenderers } from "../../../core/extensions/types.ts";
-
-/** What this component needs from a tool: how to draw it, without executing it. */
-export type { ToolRenderers };
-
+import type { ToolTreeSnapshot, TreeState } from "../../../core/tool-tree.ts";
 import { formatToolCallWithArgs, getTextOutput as getRenderedTextOutput } from "../../../core/tools/render-utils.ts";
 import { ensurePngTranscoder } from "../../../utils/image-convert.ts";
 import { theme } from "../theme/theme.ts";
 import { keyHint } from "./keybinding-hints.ts";
+import { ToolTreeComponent } from "./tool-tree.ts";
+
+/** What this component needs from a tool: how to draw it, without executing it. */
+export type { ToolRenderers };
 
 const FALLBACK_PREVIEW_LINES = 10;
 
@@ -37,7 +38,9 @@ export class ToolExecutionComponent extends Container {
 	private selfRenderHeight = 0;
 	private callRendererComponent?: Component;
 	private resultRendererComponent?: Component;
+	private treeComponent?: ToolTreeComponent;
 	private rendererState: any = {};
+	private treeViewState: TreeState = { open: new Map(), shownChildren: new Map() };
 	private imageComponents: Image[] = [];
 	/** Inputs of imageComponents, so updateDisplay can reuse images and keep their converted PNG data. */
 	private imageSources: Array<{ data: string; mimeType: string; widthCells: number }> = [];
@@ -111,6 +114,10 @@ export class ToolExecutionComponent extends Container {
 		return this.toolDefinition?.renderResult;
 	}
 
+	private getTreeRenderer(): ToolDefinition<any, any>["renderTree"] | undefined {
+		return this.toolDefinition?.renderTree;
+	}
+
 	private hasRendererDefinition(): boolean {
 		return this.toolDefinition !== undefined;
 	}
@@ -139,6 +146,64 @@ export class ToolExecutionComponent extends Container {
 			durationMs: this.isPartial ? undefined : this.result?.durationMs,
 			outputPad: this.outputPad,
 		};
+	}
+
+	private getTreeSnapshot(): ToolTreeSnapshot {
+		const phase =
+			this.result && !this.isPartial
+				? "complete"
+				: this.executionStarted
+					? "running"
+					: this.argsComplete
+						? "queued"
+						: "arguments";
+		return {
+			args: this.args,
+			...(this.result
+				? {
+						result: {
+							content: this.result.content as any,
+							details: this.result.details,
+							structuredContent: this.result.structuredContent,
+							isError: this.result.isError,
+						},
+					}
+				: {}),
+			phase,
+			isError: this.result?.isError ?? false,
+			...(this.isPartial ? {} : { durationMs: this.result?.durationMs }),
+		};
+	}
+
+	private createTreeComponent(): ToolTreeComponent | undefined {
+		const treeRenderer = this.getTreeRenderer();
+		if (!treeRenderer) return undefined;
+		try {
+			const roots = treeRenderer(this.getTreeSnapshot(), theme, {
+				toolCallId: this.toolCallId,
+				cwd: this.cwd,
+				state: this.rendererState,
+				viewState: this.treeViewState,
+				invalidate: () => {
+					this.invalidate();
+					this.ui.requestRender();
+				},
+			});
+			if (!this.treeComponent) {
+				this.treeComponent = new ToolTreeComponent(roots, theme, {
+					state: this.treeViewState,
+					padding: this.outputPad,
+					invalidate: () => this.ui.requestRender(),
+				});
+			} else {
+				this.treeComponent.update(roots, theme);
+				this.treeComponent.setPadding(this.outputPad);
+			}
+			return this.treeComponent;
+		} catch (error) {
+			if (process.env.PI_DEBUG_TOOL_TREE) console.error(error);
+			return undefined;
+		}
 	}
 
 	private createCallFallback(): Component {
@@ -287,53 +352,59 @@ export class ToolExecutionComponent extends Container {
 			}
 			renderContainer.clear();
 
-			const callRenderer = this.getCallRenderer();
-			if (!callRenderer) {
-				renderContainer.addChild(this.createResultRegion(this.createCallFallback()));
+			const treeComponent = this.createTreeComponent();
+			if (treeComponent) {
+				renderContainer.addChild(treeComponent);
 				hasContent = true;
 			} else {
-				try {
-					const component = callRenderer(this.args, theme, this.getRenderContext(this.callRendererComponent));
-					this.callRendererComponent = component;
-					renderContainer.addChild(this.createResultRegion(component));
-					hasContent = true;
-				} catch {
-					this.callRendererComponent = undefined;
+				const callRenderer = this.getCallRenderer();
+				if (!callRenderer) {
 					renderContainer.addChild(this.createResultRegion(this.createCallFallback()));
 					hasContent = true;
-				}
-			}
-
-			if (this.result) {
-				const resultRenderer = this.getResultRenderer();
-				if (!resultRenderer) {
-					const component = this.createResultFallback();
-					if (component) {
-						renderContainer.addChild(this.createResultRegion(component));
-						hasContent = true;
-					}
 				} else {
 					try {
-						const component = resultRenderer(
-							{
-								content: this.result.content as any,
-								details: this.result.details,
-								structuredContent: this.result.structuredContent,
-								isError: this.result.isError,
-							},
-							{ expanded: this.expanded, isPartial: this.isPartial },
-							theme,
-							this.getRenderContext(this.resultRendererComponent),
-						);
-						this.resultRendererComponent = component;
+						const component = callRenderer(this.args, theme, this.getRenderContext(this.callRendererComponent));
+						this.callRendererComponent = component;
 						renderContainer.addChild(this.createResultRegion(component));
 						hasContent = true;
 					} catch {
-						this.resultRendererComponent = undefined;
+						this.callRendererComponent = undefined;
+						renderContainer.addChild(this.createResultRegion(this.createCallFallback()));
+						hasContent = true;
+					}
+				}
+
+				if (this.result) {
+					const resultRenderer = this.getResultRenderer();
+					if (!resultRenderer) {
 						const component = this.createResultFallback();
 						if (component) {
 							renderContainer.addChild(this.createResultRegion(component));
 							hasContent = true;
+						}
+					} else {
+						try {
+							const component = resultRenderer(
+								{
+									content: this.result.content as any,
+									details: this.result.details,
+									structuredContent: this.result.structuredContent,
+									isError: this.result.isError,
+								},
+								{ expanded: this.expanded, isPartial: this.isPartial },
+								theme,
+								this.getRenderContext(this.resultRendererComponent),
+							);
+							this.resultRendererComponent = component;
+							renderContainer.addChild(this.createResultRegion(component));
+							hasContent = true;
+						} catch {
+							this.resultRendererComponent = undefined;
+							const component = this.createResultFallback();
+							if (component) {
+								renderContainer.addChild(this.createResultRegion(component));
+								hasContent = true;
+							}
 						}
 					}
 				}

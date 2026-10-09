@@ -82,6 +82,11 @@ import type { Settings } from "../settings-manager.ts";
 import type { SlashCommandInfo } from "../slash-commands.ts";
 import type { SourceInfo } from "../source-info.ts";
 import type { BuildSystemPromptOptions, NormalizedBuildSystemPromptOptions } from "../system-prompt.ts";
+import type {
+	ToolTreeContext as ToolTreeContextType,
+	ToolTreeNode as ToolTreeNodeType,
+	ToolTreeSnapshot as ToolTreeSnapshotType,
+} from "../tool-tree.ts";
 import type { BashOperations } from "../tools/bash.ts";
 import type { EditToolDetails } from "../tools/edit.ts";
 import type {
@@ -106,6 +111,14 @@ export type { ExecOptions, ExecResult } from "../exec.ts";
 export type { BuildSystemPromptOptions, NormalizedBuildSystemPromptOptions } from "../system-prompt.ts";
 export type { AgentToolResult, AgentToolUpdateCallback, ToolExecutionMode };
 export type { AppKeybinding, KeybindingsManager } from "../keybindings.ts";
+export type {
+	ToolTreeContent,
+	ToolTreeContext,
+	ToolTreeNode,
+	ToolTreeSnapshot,
+	TreeState,
+	TreeStatus,
+} from "../tool-tree.ts";
 
 // ============================================================================
 // UI Context
@@ -659,11 +672,18 @@ export interface ToolDefinition<TParams extends TSchema = TSchema, TDetails = un
 		theme: Theme,
 		context: ToolRenderContext<TState, Static<TParams>>,
 	) => Component;
+
+	/** Semantic tree rendering for interactive display and HTML export. */
+	renderTree?: (
+		snapshot: ToolTreeSnapshotType<Static<TParams>, TDetails>,
+		theme: Theme,
+		context: ToolTreeContextType<TState>,
+	) => readonly ToolTreeNodeType[];
 }
 
 type AnyToolDefinition = ToolDefinition<any, any, any>;
 
-export type ToolRenderers = Pick<AnyToolDefinition, "renderShell" | "renderCall" | "renderResult">;
+export type ToolRenderers = Pick<AnyToolDefinition, "renderShell" | "renderCall" | "renderResult" | "renderTree">;
 
 /**
  * Chooses how calls to a tool are drawn, including tools that are not registered. `next()` returns
@@ -1760,6 +1780,13 @@ export interface ExtensionAPI {
 	/** Get available slash commands in the current session. */
 	getCommands(): SlashCommandInfo[];
 
+	/**
+	 * Run a built-in or extension slash command as if the user typed it, including the
+	 * interactive UI it opens. Returns false when the runtime has no command dispatcher
+	 * (rpc, json, print, SDK) or when the text is not a slash command. Interactive mode only.
+	 */
+	runCommand(text: string): Promise<boolean>;
+
 	// =========================================================================
 	// Model and Thinking Level
 	// =========================================================================
@@ -2112,6 +2139,8 @@ export type GetSettingsHandler = () => Settings;
 
 export type GetCommandsHandler = () => SlashCommandInfo[];
 
+export type RunCommandHandler = (text: string) => Promise<boolean>;
+
 export type SetActiveToolsHandler = (toolNames: string[]) => void;
 
 export type RefreshToolsHandler = () => void;
@@ -2176,6 +2205,7 @@ export interface ExtensionActions {
 	setActiveTools: SetActiveToolsHandler;
 	refreshTools: RefreshToolsHandler;
 	getCommands: GetCommandsHandler;
+	runCommand: RunCommandHandler;
 	setModel: SetModelHandler;
 	getThinkingLevel: GetThinkingLevelHandler;
 	setThinkingLevel: SetThinkingLevelHandler;
@@ -2215,6 +2245,8 @@ export interface ExtensionContextActions {
  */
 export interface ExtensionCommandContextActions {
 	waitForIdle: () => Promise<void>;
+	/** Backs `pi.runCommand()`. Interactive mode only; absent elsewhere. */
+	runCommand?: RunCommandHandler;
 	newSession: (options?: {
 		parentSession?: string;
 		setup?: (sessionManager: SessionManager) => Promise<void>;

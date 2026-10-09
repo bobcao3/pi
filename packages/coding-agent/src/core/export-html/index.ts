@@ -14,6 +14,8 @@ import { SessionManager } from "../session-manager.ts";
  * Used by agent-session to pre-render extension tool output.
  */
 export interface ToolHtmlRenderer {
+	/** Return true when the tool has a semantic tree renderer. */
+	hasTreeRenderer?(toolName: string): boolean;
 	/** Render a tool call to HTML. Returns undefined if tool has no custom renderer. */
 	renderCall(toolCallId: string, toolName: string, args: unknown): string | undefined;
 	/** Render a tool result to HTML. Returns collapsed/expanded or undefined if tool has no custom renderer. */
@@ -195,7 +197,10 @@ function preRenderCustomTools(
 		// Find tool calls in assistant messages
 		if (msg.role === "assistant" && Array.isArray(msg.content)) {
 			for (const block of msg.content) {
-				if (block.type === "toolCall" && !TEMPLATE_RENDERED_TOOLS.has(block.name)) {
+				if (
+					block.type === "toolCall" &&
+					(toolRenderer.hasTreeRenderer?.(block.name) || !TEMPLATE_RENDERED_TOOLS.has(block.name))
+				) {
 					const callHtml = toolRenderer.renderCall(block.id, block.name, block.arguments);
 					if (callHtml) {
 						renderedTools[block.id] = { callHtml };
@@ -209,7 +214,7 @@ function preRenderCustomTools(
 			const toolName = msg.toolName || "";
 			// Only render if we have a pre-rendered call OR it's not template-rendered
 			const existing = renderedTools[msg.toolCallId];
-			if (existing || !TEMPLATE_RENDERED_TOOLS.has(toolName)) {
+			if (existing || toolRenderer.hasTreeRenderer?.(toolName) || !TEMPLATE_RENDERED_TOOLS.has(toolName)) {
 				const rendered = toolRenderer.renderResult(
 					msg.toolCallId,
 					toolName,
