@@ -3,7 +3,8 @@ import { createHash } from "node:crypto";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { codingAgentName, smokeTestCodingAgent } from "./coding-agent-smoke.mjs";
+import { smokeTestCodingAgent } from "./coding-agent-smoke.mjs";
+import { durableName, smokeTestDurable } from "./durable-smoke.mjs";
 import { installConsumer } from "./local-package-install.mjs";
 
 assert.equal(process.argv.length, 3, "Usage: node scripts/verify-fork-artifacts.mjs ARTIFACT_DIRECTORY");
@@ -42,10 +43,12 @@ try {
 		installConsumer({
 			artifactSet,
 			directory: consumer,
-			packageNames: [codingAgentName],
+			packageNames: packages.map(pkg => pkg.name),
 			packageManager: manager,
 		});
-		smokeTestCodingAgent(consumer, manager === "npm" ? process.execPath : "bun");
+		const runtime = manager === "npm" ? process.execPath : "bun";
+		smokeTestCodingAgent(consumer, runtime);
+		if (tarballs.has(durableName)) smokeTestDurable(consumer, runtime);
 	}
 	await writeFile(join(directory, "verification.json"), `${JSON.stringify({
 		version: manifest.version, forkRevision: manifest.forkRevision, npm: "passed", bun: "passed",
