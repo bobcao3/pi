@@ -15,6 +15,7 @@ import type {
 	Usage,
 } from "@earendil-works/pi-ai";
 import type { Static, TSchema } from "typebox";
+import type { RuntimeActivity } from "./runtime-activity.ts";
 
 /**
  * Stream function used by the agent loop. `Models.streamSimple` satisfies
@@ -192,6 +193,7 @@ export interface PrepareNextTurnContext extends AgentTurnContext {}
 
 export interface AgentLoopConfig extends SimpleStreamOptions {
 	model: Model<any>;
+	activity?: RuntimeActivity;
 
 	/**
 	 * Converts AgentMessage[] to LLM-compatible Message[] before each LLM call.
@@ -443,6 +445,8 @@ export interface AgentToolResult<T = JsonValue | undefined> {
 	 * Early termination only happens when every finalized tool result in the batch sets this to true.
 	 */
 	terminate?: boolean;
+	/** With `terminate: true`, keeps terminal status working until the next event resumes the agent. */
+	awaitingEvent?: boolean;
 }
 
 /** Final outcome of a tool call after hooks ran. */
