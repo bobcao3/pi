@@ -42,9 +42,12 @@ export async function runPrintMode(runtimeHost: AgentSessionRuntime, options: Pr
 	const disposeRuntime = async (): Promise<void> => {
 		if (disposed) return;
 		disposed = true;
-		unsubscribe?.();
-		unsubscribeBackpressure?.();
-		await runtimeHost.dispose();
+		try {
+			await runtimeHost.dispose();
+		} finally {
+			unsubscribe?.();
+			unsubscribeBackpressure?.();
+		}
 	};
 
 	const registerSignalHandlers = (): void => {
@@ -135,6 +138,8 @@ export async function runPrintMode(runtimeHost: AgentSessionRuntime, options: Pr
 		for (const message of messages) {
 			await session.prompt(message);
 		}
+
+		await disposeRuntime();
 
 		if (mode === "text") {
 			const state = session.state;

@@ -92,9 +92,12 @@ describe("ExtensionRunner", () => {
 		setActiveTools: () => {},
 		refreshTools: () => {},
 		getCommands: () => [],
+		runCommand: async () => false,
 		setModel: async () => false,
 		getThinkingLevel: () => "off",
 		setThinkingLevel: () => {},
+		setDefaultModel: () => {},
+		setDefaultThinkingLevel: () => {},
 	};
 
 	const extensionContextActions: ExtensionContextActions = {

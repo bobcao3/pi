@@ -53,6 +53,9 @@ type RenderSessionContextThis = {
 	maybeShowAssistantDiagnostics(message: AssistantMessage): void;
 	addMessageToChat(message: AgentMessage, options?: { populateHistory?: boolean }): void;
 	renderSessionItems: RenderSessionItems;
+	toolBatches: Map<unknown, unknown>;
+	appendToolCalls: unknown;
+	toolPresentationOptions: unknown;
 };
 
 type RenderSessionEntries = (
@@ -88,6 +91,9 @@ function createFakeInteractiveModeThis(): RenderSessionContextThis {
 		addMessageToChat(message: AgentMessage) {
 			chatContainer.addChild(new Text(message.role, 0, 0));
 		},
+		toolBatches: new Map(),
+		appendToolCalls: Reflect.get(InteractiveMode.prototype, "appendToolCalls"),
+		toolPresentationOptions: Reflect.get(InteractiveMode.prototype, "toolPresentationOptions"),
 	};
 }
 

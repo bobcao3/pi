@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { delimiter, join } from "path";
@@ -452,6 +453,40 @@ describe("detectInstallMethod", () => {
 });
 
 describe("detectInstallChange", () => {
+	test.each([false, true])("tracks Pi runtime changes with hosted application=%s", (hosted) => {
+		tempDir = mkdtempSync(join(tmpdir(), "pi-hosted-install-change-"));
+		const runtimeDir = join(tempDir, "runtime");
+		const runtimeManifest = join(runtimeDir, "package.json");
+		const applicationManifest = join(tempDir, "application.json");
+		const script = join(tempDir, "check.mjs");
+		mkdirSync(runtimeDir);
+		writeFileSync(runtimeManifest, JSON.stringify({ version: "1.1.1-cpi.1" }));
+		writeFileSync(applicationManifest, JSON.stringify({ version: "0.0.4", piConfig: { name: "cpi" } }));
+		writeFileSync(
+			script,
+			`
+import assert from "node:assert/strict";
+import { writeFileSync } from "node:fs";
+import { APP_NAME, VERSION, detectInstallChange } from ${JSON.stringify(new URL("../src/config.ts", import.meta.url).href)};
+assert.equal(APP_NAME, ${JSON.stringify(hosted ? "cpi" : "pi")});
+assert.equal(VERSION, ${JSON.stringify(hosted ? "0.0.4" : "1.1.1-cpi.1")});
+assert.equal(detectInstallChange(), undefined);
+writeFileSync(${JSON.stringify(applicationManifest)}, JSON.stringify({ version: "0.0.5" }));
+assert.equal(detectInstallChange(), undefined);
+process.env.PI_PACKAGE_DIR = ${JSON.stringify(tempDir)};
+writeFileSync(${JSON.stringify(join(tempDir, "package.json"))}, JSON.stringify({ version: "9.9.9" }));
+assert.equal(detectInstallChange(), undefined);
+writeFileSync(${JSON.stringify(runtimeManifest)}, JSON.stringify({ version: "1.1.1-cpi.2" }));
+assert.deepEqual(detectInstallChange(), { kind: "updated", previousVersion: "1.1.1-cpi.1", version: "1.1.1-cpi.2" });
+assert.equal(VERSION, ${JSON.stringify(hosted ? "0.0.4" : "1.1.1-cpi.1")});
+`,
+		);
+		const env: NodeJS.ProcessEnv = { ...process.env, PI_PACKAGE_DIR: runtimeDir };
+		if (hosted) env.PI_APPLICATION_MANIFEST = applicationManifest;
+		else delete env.PI_APPLICATION_MANIFEST;
+		execFileSync(process.execPath, [script], { env, timeout: 10000, stdio: "pipe" });
+	});
+
 	// Regression test for #10439: a deleted pnpm install must not fall back to a package.json further up.
 	test("reports a removed install instead of reading a package.json further up", () => {
 		tempDir = mkdtempSync(join(tmpdir(), "pi-install-change-"));

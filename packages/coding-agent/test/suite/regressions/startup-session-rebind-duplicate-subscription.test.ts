@@ -1,9 +1,12 @@
+import { RuntimeActivity } from "@earendil-works/pi-agent-core";
 import { describe, expect, it, vi } from "vitest";
 import { InteractiveMode } from "../../../src/modes/interactive/interactive-mode.ts";
 
 type RebindContext = {
 	session: object;
 	unsubscribe?: () => void;
+	sessionManager: { getCwd: () => string };
+	footerDataProvider: { setProject: (project: { cwd: string }) => void };
 	applyRuntimeSettings: () => void;
 	programStatus: { reset(): void };
 	renderCurrentSessionState: () => void;
@@ -22,8 +25,8 @@ const interactiveModePrototype = InteractiveMode.prototype as unknown as Interac
 
 describe("overlapping startup and replacement session rebinds", () => {
 	it("does not subscribe from the stale startup rebind", async () => {
-		const startupSession = {};
-		const replacementSession = {};
+		const startupSession = { agent: { activity: new RuntimeActivity() } };
+		const replacementSession = { agent: { activity: new RuntimeActivity() } };
 		let resolveStartupBind!: () => void;
 		let resolveReplacementBind!: () => void;
 
@@ -40,6 +43,8 @@ describe("overlapping startup and replacement session rebinds", () => {
 
 		const context: RebindContext = {
 			session: startupSession,
+			sessionManager: { getCwd: () => "/repo" },
+			footerDataProvider: { setProject: () => {} },
 			applyRuntimeSettings: () => {},
 			programStatus: { reset: () => {} },
 			renderCurrentSessionState: () => {},

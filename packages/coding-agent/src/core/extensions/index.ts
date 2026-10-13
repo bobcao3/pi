@@ -178,10 +178,14 @@ export type {
 	ToolCallEventResult,
 	// Tools
 	ToolDefinition,
+	ToolExecutionBatchCall,
 	// Events - Tool Execution
 	ToolExecutionEndEvent,
 	// Tool execution mode
 	ToolExecutionMode,
+	ToolExecutionNestedCall,
+	ToolExecutionRenderContext,
+	ToolExecutionSnapshot,
 	ToolExecutionStartEvent,
 	ToolExecutionUpdateEvent,
 	ToolExposure,

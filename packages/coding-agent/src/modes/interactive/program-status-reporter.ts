@@ -46,6 +46,11 @@ export class ProgramStatusReporter {
 						? { state: "error", message: firstLine(event.message.errorMessage) }
 						: { state: "done" };
 				break;
+			case "tool_execution_end":
+				if (!event.isError && event.result?.terminate === true && event.result.awaitingEvent === true) {
+					this.runResult = { state: "working" };
+				}
+				break;
 			case "compaction_start":
 				this.compacting = true;
 				break;
