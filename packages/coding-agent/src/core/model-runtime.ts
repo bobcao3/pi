@@ -297,6 +297,9 @@ export class ModelRuntime implements Models {
 
 	/** Returns the provider without virtual models, or undefined when only virtual models define it. */
 	private recomposeProvider(providerId: string): Provider | undefined {
+		++this.availabilityRefreshSeq;
+		++this.availabilityErrorSeq;
+		this.providerAvailabilitySeq.set(providerId, (this.providerAvailabilitySeq.get(providerId) ?? 0) + 1);
 		const provider = this.composeProvider(providerId);
 		const virtualModels = [...(this.virtualModels.get(providerId)?.values() ?? [])].map((entry) => entry.model);
 		if (virtualModels.length > 0) this.models.setProvider(withVirtualModels(providerId, provider, virtualModels));
