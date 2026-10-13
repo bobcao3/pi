@@ -13,6 +13,7 @@ import { getTextOutput, replaceTabs, startToolTimer, str, toolTimerText } from "
 import { keyHint } from "../../modes/interactive/components/keybinding-hints.ts";
 import { VisualLinePreview } from "../../modes/interactive/components/visual-truncate.ts";
 import { highlightCode, type Theme } from "../../modes/interactive/theme/theme.ts";
+import { formatCodemodeOutput } from "./output.ts";
 import type { CodemodeNestedCall, CodemodeToolDetails } from "./tool.ts";
 
 const CODE_PREVIEW_LINES = 10;
@@ -118,11 +119,16 @@ export const codemodeRenderers: Pick<
 
 		// Drop the "Script completed\nWall time ...\nOutput:\n" header. Rejected input (invalid options)
 		// has no header.
-		const [first, ...rest] = result.content;
+		const content = result.content.map((block, index) =>
+			block.type === "text"
+				? { ...block, text: formatCodemodeOutput(block.text, result.details?.output?.[index]) }
+				: block,
+		);
+		const [first, ...rest] = content;
 		const hasHeader = first?.type === "text" && SCRIPT_HEADER.test(first.text);
 		const output = options.isPartial
 			? ""
-			: getTextOutput({ ...result, content: hasHeader ? rest : result.content }, context.showImages).trim();
+			: getTextOutput({ ...result, content: hasHeader ? rest : content }, context.showImages).trim();
 		if (output) {
 			const color = context.isError ? "error" : "toolOutput";
 			const styled = replaceTabs(output)
@@ -147,6 +153,8 @@ export const codemodeRenderers: Pick<
 				if (fullOutputPath) component.addChild(new Text(theme.fg("muted", `Full output: ${fullOutputPath}`), 0, 0));
 			}
 		}
+		if (result.details?.outputMetadataLimited)
+			component.addChild(new Text(theme.fg("muted", "Output type metadata exceeded the display limit"), 0, 0));
 		if (timerText) {
 			component.addChild(new Spacer(1));
 			component.addChild(new Text(theme.fg("muted", timerText), 0, 0));

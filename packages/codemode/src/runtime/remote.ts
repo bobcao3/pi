@@ -157,7 +157,9 @@ export function serveCodemodeRemote(
 			switch (typed.type) {
 				case "output": {
 					buffered.push(typed);
-					bufferedChars += typed.item.type === "text" ? typed.item.text.length : typed.item.data.length;
+					bufferedChars +=
+						(typed.item.type === "image" ? typed.item.data.length : typed.item.text.length) +
+						(typed.schema?.length ?? 0);
 					if (buffered.length >= FLUSH_ITEMS || bufferedChars >= FLUSH_CHARS) {
 						exchange(takeBuffer()).then(reply, () => end(undefined));
 					}

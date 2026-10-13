@@ -42,13 +42,13 @@ function valueText(value: unknown): string {
  * `==> text N/M <==` line; `console` lines follow all other output in one `<console_output>` block.
  */
 function formatItems(output: readonly CodemodeOutputItem[]): Item[] {
-	const total = output.filter((item) => item.type === "text" && !item.console).length;
+	const total = output.filter((item) => item.type !== "image" && !(item.type === "text" && item.console)).length;
 	const items: Item[] = [];
 	const consoleLines: string[] = [];
 	let index = 0;
 	for (const item of output) {
 		if (item.type === "image") items.push(item);
-		else if (item.console) consoleLines.push(item.text);
+		else if (item.type === "text" && item.console) consoleLines.push(item.text);
 		else {
 			index++;
 			items.push({ type: "text", text: total > 1 ? `==> text ${index}/${total} <==\n${item.text}` : item.text });

@@ -230,7 +230,12 @@ describe("AgentSession codemode tool", () => {
 
 		const result = codemodeResult(harness);
 		expect(result.isError).toBe(false);
-		expect(resultText(result)).toBe(
+		expect(
+			result.content
+				.slice(1)
+				.map((block) => (block.type === "text" ? block.text : ""))
+				.join(""),
+		).toBe(
 			'==> text 1/2 <==\necho,stats,screenshot\n==> text 2/2 <==\n{"a":"echo: one","b":"echo: two","names":["a","b"]}\n<console_output>\nfiles 2\n</console_output>',
 		);
 		const details = result.details as unknown as CodemodeToolDetails;
@@ -393,7 +398,7 @@ describe("AgentSession codemode tool", () => {
 		expect(result.content[2]).toEqual({ type: "image", data: TINY_PNG_BASE64, mimeType: "image/png" });
 	});
 
-	it("marks where each text item starts and puts console lines last in one text block", async () => {
+	it("marks where each text item starts and puts console lines last in one console block", async () => {
 		const harness = await setup();
 		harness.setResponses([
 			fauxAssistantMessage(
@@ -409,12 +414,20 @@ describe("AgentSession codemode tool", () => {
 
 		await harness.session.prompt("go");
 
-		// Providers join adjacent text blocks with nothing or a newline, so the output is one block.
 		const result = codemodeResult(harness);
-		expect(result.content).toHaveLength(2);
-		expect(resultText(result)).toBe(
+		expect(
+			result.content
+				.slice(1)
+				.map((block) => (block.type === "text" ? block.text : ""))
+				.join(""),
+		).toBe(
 			"==> text 1/3 <==\none\ntwo\n==> text 2/3 <==\nthree\n==> text 3/3 <==\n4\n<console_output>\na\nb\n</console_output>",
 		);
+		const returnedIndex = result.content.findIndex((block) => block.type === "text" && block.text === "4");
+		expect(returnedIndex).toBeGreaterThan(0);
+		expect((result.details as unknown as CodemodeToolDetails).output?.[returnedIndex]).toMatchObject({
+			type: "json",
+		});
 	});
 
 	it("reports script failures as results that keep partial output and the calls that ran", async () => {

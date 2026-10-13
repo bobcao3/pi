@@ -195,6 +195,7 @@ export async function startVm(options: StartVmOptions): Promise<VmSession> {
 				message.ok ? vm.true : vm.false,
 				message.payload === undefined ? vm.undefined : vm.newString(message.payload),
 				message.properties === undefined ? vm.undefined : vm.newString(message.properties),
+				message.schema === undefined ? vm.undefined : vm.newString(message.schema),
 			);
 		});
 		drain();
@@ -251,7 +252,7 @@ export async function startVm(options: StartVmOptions): Promise<VmSession> {
 
 	try {
 		// Called from the prelude with primitives only.
-		const bridge = vm.newFunction("bridge", (kind, a, b, c) => {
+		const bridge = vm.newFunction("bridge", (kind, a, b, c, d) => {
 			switch (kind.toString()) {
 				case "call":
 				case "global":
@@ -272,7 +273,8 @@ export async function startVm(options: StartVmOptions): Promise<VmSession> {
 								? { type: "image", data: b.toString(), mimeType: c.toString() }
 								: a.toString() === "console"
 									? { type: "text", text: b.toString(), console: true }
-									: { type: "text", text: b.toString() },
+									: { type: a.toString() === "json" ? "json" : "text", text: b.toString() },
+						...(a.toString() === "json" && c !== undefined && !c.isUndefined ? { schema: c.toString() } : {}),
 					});
 					break;
 				case "done": {
@@ -284,6 +286,7 @@ export async function startVm(options: StartVmOptions): Promise<VmSession> {
 							ok: true,
 							value: b === undefined || b.isUndefined ? undefined : b.toString(),
 							writes: c.toString(),
+							...(d !== undefined && !d.isUndefined ? { schema: d.toString() } : {}),
 							...during,
 						});
 					} else {
