@@ -2347,10 +2347,6 @@ export class InteractiveMode {
 	private setEditorWorkingStatusIndicator(indicator: StatusIndicator | undefined): boolean {
 		this.defaultEditor.setWorkingStatusIndicator(undefined);
 		if (!isEmbeddedStatus(this.editor)) return false;
-		if (indicator?.kind === "working") {
-			this.editor.setWorkingStatusIndicator(undefined);
-			return false;
-		}
 		this.editor.setWorkingStatusIndicator(indicator);
 		return true;
 	}
@@ -3572,6 +3568,8 @@ export class InteractiveMode {
 						this.hiddenThinkingLabel,
 						this.outputPad,
 						this.getMarkdownTransformers(),
+						this.session.extensionRunner.getThinkingRenderer(),
+						() => this.ui.requestRender(),
 					);
 					this.streamingMessage = event.message;
 					this.chatContainer.addChild(this.streamingComponent);
@@ -4039,6 +4037,8 @@ export class InteractiveMode {
 					this.hiddenThinkingLabel,
 					this.outputPad,
 					this.getMarkdownTransformers(),
+					this.session.extensionRunner.getThinkingRenderer(),
+					() => this.ui.requestRender(),
 				);
 				this.chatContainer.addChild(assistantComponent);
 				break;

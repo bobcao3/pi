@@ -1,6 +1,6 @@
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import { Container, Markdown, type MarkdownTheme, MouseRegion, Spacer, Text } from "@earendil-works/pi-tui";
-import type { MarkdownTransformer } from "../../../core/extensions/types.ts";
+import type { MarkdownTransformer, ThinkingRenderer } from "../../../core/extensions/types.ts";
 import { getMarkdownTheme, theme } from "../theme/theme.ts";
 import { createMarkdownTransform } from "./markdown-transform.ts";
 import { ThinkingBlock } from "./thinking-block.ts";
@@ -19,10 +19,14 @@ export class AssistantMessageComponent extends Container {
 	private hiddenThinkingLabel: string;
 	private outputPad: number;
 	private markdownTransformers: readonly MarkdownTransformer[];
+	private thinkingRenderer?: ThinkingRenderer;
+	private requestRender: () => void;
 	private lastMessage?: AssistantMessage;
 	private hasToolCalls = false;
 	private isStreaming = false;
 	private thinkingVisibilityOverrides = new Map<number, boolean>();
+	private thinkingRendererStates = new Map<number, Record<string, unknown>>();
+	private thinkingExpanded = false;
 
 	constructor(
 		message?: AssistantMessage,
@@ -31,6 +35,8 @@ export class AssistantMessageComponent extends Container {
 		hiddenThinkingLabel = "Thinking...",
 		outputPad = 1,
 		markdownTransformers: readonly MarkdownTransformer[] = [],
+		thinkingRenderer?: ThinkingRenderer,
+		requestRender: () => void = () => {},
 	) {
 		super();
 
@@ -39,6 +45,8 @@ export class AssistantMessageComponent extends Container {
 		this.hiddenThinkingLabel = hiddenThinkingLabel;
 		this.outputPad = outputPad;
 		this.markdownTransformers = markdownTransformers;
+		this.thinkingRenderer = thinkingRenderer;
+		this.requestRender = requestRender;
 
 		// Container for text/thinking content
 		this.contentContainer = new Container();
@@ -59,6 +67,8 @@ export class AssistantMessageComponent extends Container {
 	setHideThinkingBlock(hide: boolean): void {
 		this.hideThinkingBlock = hide;
 		this.thinkingVisibilityOverrides.clear();
+		this.thinkingRendererStates.clear();
+		this.thinkingExpanded = !hide;
 		if (this.lastMessage) {
 			this.updateContent(this.lastMessage);
 		}
@@ -130,6 +140,7 @@ export class AssistantMessageComponent extends Container {
 				}
 				i--;
 
+				const runIndex = thinkingRunIndex++;
 				if (thinkingBlocks.length === 0) {
 					continue;
 				}
@@ -140,8 +151,34 @@ export class AssistantMessageComponent extends Container {
 					.slice(i + 1)
 					.some((c) => (c.type === "text" && c.text.trim()) || (c.type === "thinking" && c.thinking.trim()));
 
-				const runIndex = thinkingRunIndex++;
 				const hidden = this.thinkingVisibilityOverrides.get(runIndex) ?? this.hideThinkingBlock;
+				if (this.thinkingRenderer) {
+					const state = this.thinkingRendererStates.get(runIndex) ?? {};
+					this.thinkingRendererStates.set(runIndex, state);
+					const rendered = this.thinkingRenderer(
+						thinkingBlocks,
+						{
+							message,
+							requestRender: this.requestRender,
+							hidden,
+							expanded: this.thinkingExpanded,
+							isStreaming: this.isStreaming,
+							markdownTheme: this.markdownTheme,
+							transform: createMarkdownTransform(
+								"assistant-thinking",
+								this.isStreaming,
+								this.markdownTransformers,
+							),
+							state,
+						},
+						theme,
+					);
+					if (rendered !== undefined) {
+						this.contentContainer.addChild(rendered);
+						if (hasVisibleContentAfter) this.contentContainer.addChild(new Spacer(1));
+						continue;
+					}
+				}
 				const thinkingComponent = new ThinkingBlock(
 					thinkingBlocks.join("\n\n"),
 					hidden,

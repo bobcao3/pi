@@ -20,6 +20,7 @@ import type {
 import type {
 	AnyModel,
 	Api,
+	AssistantMessage,
 	AssistantMessageEvent,
 	AssistantMessageEventStream,
 	ClassifierApi,
@@ -50,6 +51,7 @@ import type {
 	EditorComponent,
 	EditorTheme,
 	KeyId,
+	MarkdownTheme,
 	OverlayHandle,
 	OverlayOptions,
 	TUI,
@@ -1592,6 +1594,25 @@ export interface MarkdownTransformContext {
 
 export type MarkdownTransformer = (markdown: string, context: MarkdownTransformContext) => string;
 
+export interface ThinkingRenderOptions {
+	message: AssistantMessage;
+	requestRender: () => void;
+	hidden: boolean;
+	/** Pi sets expanded after an explicit visibility toggle; initial renders leave expanded false. */
+	expanded: boolean;
+	isStreaming: boolean;
+	markdownTheme: MarkdownTheme;
+	transform: (markdown: string, availableWidth: number) => string;
+	/** Pi retains state per thinking run across rebuilds and clears state when thinking visibility changes. */
+	state: Record<string, unknown>;
+}
+
+export type ThinkingRenderer = (
+	blocks: readonly string[],
+	options: ThinkingRenderOptions,
+	theme: Theme,
+) => Component | undefined;
+
 export interface EntryRenderOptions {
 	expanded: boolean;
 }
@@ -1762,6 +1783,9 @@ export interface ExtensionAPI {
 
 	/** Register a transformer for user and assistant Markdown before Pi renders it in the interactive transcript. */
 	registerMarkdownTransformer(transformer: MarkdownTransformer): void;
+
+	/** Replace thinking blocks in the interactive transcript. Return undefined to use Pi's default renderer. */
+	registerThinkingRenderer(renderer: ThinkingRenderer): void;
 
 	/** Register a custom renderer for CustomEntry. Custom entries do not participate in LLM context. */
 	registerEntryRenderer<T = unknown>(customType: string, renderer: EntryRenderer<T>): void;
@@ -2347,6 +2371,7 @@ export interface Extension {
 	messageRenderers: Map<string, MessageRenderer>;
 	toolRenderers?: ToolRendererResolver[];
 	markdownTransformer?: MarkdownTransformer;
+	thinkingRenderer?: ThinkingRenderer;
 	entryRenderers?: Map<string, EntryRenderer>;
 	commands: Map<string, RegisteredCommand>;
 	flags: Map<string, ExtensionFlag>;
