@@ -14,7 +14,7 @@ import { refreshModelCatalogs } from "../model-catalog-refresh.ts";
 import { getDistinctModelName, getModelSelectorSearchText } from "../model-search.ts";
 import { theme } from "../theme/theme.ts";
 import { DynamicBorder } from "./dynamic-border.ts";
-import { keyDisplayText, keyHint } from "./keybinding-hints.ts";
+import { dismissHint, keyDisplayText, keyHint } from "./keybinding-hints.ts";
 
 interface ModelItem {
 	provider: string;
@@ -139,12 +139,14 @@ export class ModelSelectorComponent extends Container implements Focusable {
 				new Text(
 					theme.fg(
 						"dim",
-						`  ${keyDisplayText("tui.select.confirm")} to select · ${keyDisplayText("app.models.save")} to set as default · ${keyDisplayText("tui.select.cancel")} to cancel`,
+						`  ${keyDisplayText("tui.select.confirm")} to select · ${keyDisplayText("app.models.save")} to set as default · ${dismissHint()}`,
 					),
 					0,
 					0,
 				),
 			);
+		} else {
+			this.addChild(new Text(theme.fg("dim", `  ${dismissHint()}`), 0, 0));
 		}
 
 		// Add bottom border

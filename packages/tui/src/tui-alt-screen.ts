@@ -96,6 +96,7 @@ interface SelectionPoint {
 	row: number;
 	col: number;
 	scrollView?: ScrollView;
+	overlay?: object;
 	/** Whether this point lies between terminal cells rather than on a cell. */
 	boundary?: boolean;
 }
@@ -112,6 +113,7 @@ interface ClickTarget {
 	count: number;
 	row: number;
 	scrollView?: ScrollView;
+	overlay?: object;
 	wordStart: number;
 	wordEnd: number;
 }
@@ -267,7 +269,10 @@ export class TuiAltScreen extends TuiBase implements ViewportTUI {
 				for (const child of this.children) child.invalidate();
 			},
 		};
-		this.implicitScrollView = new ScrollView(this.implicitDocument, { follow: "end", primary: true });
+		this.implicitScrollView = new ScrollView(this.implicitDocument, {
+			follow: "end",
+			primary: true,
+		});
 		this.flashes = new AltScreenFlashContainer(() => this.requestRender());
 		this.wheelScroll = new WheelScrollAccelerator(options.wheelScrollLines ?? 1);
 		this.mouseEnabled = options.mouse ?? true;
@@ -443,7 +448,10 @@ export class TuiAltScreen extends TuiBase implements ViewportTUI {
 		return this.imageProtocol === "kitty" ? deleteAllKittyImages() : "";
 	}
 
-	private prepareKittyScreen(screen: string[]): { lines: string[]; evictedImageDeletion: string } {
+	private prepareKittyScreen(screen: string[]): {
+		lines: string[];
+		evictedImageDeletion: string;
+	} {
 		const visibleImageIds = new Set<number>();
 		const lines = screen.map((line) => {
 			const placement = getKittyImagePlacement(line);
@@ -895,7 +903,13 @@ export class TuiAltScreen extends TuiBase implements ViewportTUI {
 			previous.y === y
 				? (previous.count % 3) + 1
 				: 1;
-		this.lastComponentClick = { timestamp: now, count, component: target.component, x, y };
+		this.lastComponentClick = {
+			timestamp: now,
+			count,
+			component: target.component,
+			x,
+			y,
+		};
 		return count;
 	}
 
@@ -1166,7 +1180,17 @@ export class TuiAltScreen extends TuiBase implements ViewportTUI {
 		};
 	}
 
-	private getSelectionPoint(event: SgrMouseEvent, scrollView?: ScrollView): SelectionPoint {
+	private getSelectionPoint(event: SgrMouseEvent, scrollView?: ScrollView, overlay?: object): SelectionPoint {
+		if (scrollView && overlay) throw new Error("Selection cannot span a scroll view and overlay");
+		if (overlay) {
+			const surface = this.getOverlaySelectionSurface(overlay);
+			if (!surface) return { row: 0, col: 0, overlay };
+			return {
+				row: Math.max(0, Math.min(surface.height - 1, event.y - surface.row)),
+				col: Math.max(0, Math.min(surface.width - 1, event.x - surface.col)),
+				overlay,
+			};
+		}
 		if (scrollView) {
 			const point = this.getScrollSelectionPoint(scrollView, event.x, event.y);
 			if (point) return point;
@@ -1178,6 +1202,7 @@ export class TuiAltScreen extends TuiBase implements ViewportTUI {
 	}
 
 	private getSelectionSourceLine(point: SelectionPoint): string {
+		if (point.overlay) return this.getOverlaySelectionSurface(point.overlay)?.lines[point.row] ?? "";
 		if (point.scrollView && this.currentLayout) {
 			const lines = getScrollViewBox(this.currentLayout, point.scrollView)?.scrollContentLines;
 			if (lines) return lines[point.row] ?? "";
@@ -1187,12 +1212,22 @@ export class TuiAltScreen extends TuiBase implements ViewportTUI {
 
 	private getWordSelection(point: SelectionPoint): SelectionRange | undefined {
 		const line = stripTerminalSequences(this.getSelectionSourceLine(point));
-		const segments: Array<{ start: number; end: number; selectable: boolean; joiner: boolean }> = [];
+		const segments: Array<{
+			start: number;
+			end: number;
+			selectable: boolean;
+			joiner: boolean;
+		}> = [];
 		let start = 0;
 		for (const segment of wordSegmenter.segment(line)) {
 			const end = start + visibleWidth(segment.segment);
 			const joiner = TERMINAL_WORD_SELECTION_JOINERS.has(segment.segment);
-			segments.push({ start, end, selectable: segment.isWordLike === true || joiner, joiner });
+			segments.push({
+				start,
+				end,
+				selectable: segment.isWordLike === true || joiner,
+				joiner,
+			});
 			start = end;
 		}
 		const clickedSegmentIndex = segments.findIndex(
@@ -1225,7 +1260,11 @@ export class TuiAltScreen extends TuiBase implements ViewportTUI {
 	private getLineSelection(point: SelectionPoint): SelectionRange {
 		return {
 			start: { ...point, col: 0 },
-			end: { ...point, col: visibleWidth(this.getSelectionSourceLine(point)), boundary: true },
+			end: {
+				...point,
+				col: visibleWidth(this.getSelectionSourceLine(point)),
+				boundary: true,
+			},
 		};
 	}
 
@@ -1258,6 +1297,7 @@ export class TuiAltScreen extends TuiBase implements ViewportTUI {
 			now - previous.timestamp <= DOUBLE_CLICK_INTERVAL_MS &&
 			previous.row === point.row &&
 			previous.scrollView === point.scrollView &&
+			previous.overlay === point.overlay &&
 			previous.wordStart === word.start.col &&
 			previous.wordEnd === word.end.col
 				? (previous.count % 3) + 1
@@ -1268,6 +1308,7 @@ export class TuiAltScreen extends TuiBase implements ViewportTUI {
 					count,
 					row: point.row,
 					scrollView: point.scrollView,
+					overlay: point.overlay,
 					wordStart: word.start.col,
 					wordEnd: word.end.col,
 				}
@@ -1334,7 +1375,8 @@ export class TuiAltScreen extends TuiBase implements ViewportTUI {
 		const button = event.button & 3;
 		if (button !== 0 && !(event.release && button === 3)) return;
 		const anchorScrollView = this.selectionAnchor?.scrollView;
-		const point = this.getSelectionPoint(event, anchorScrollView);
+		const anchorOverlay = this.selectionAnchor?.overlay;
+		const point = this.getSelectionPoint(event, anchorScrollView, anchorOverlay);
 		if (event.release) {
 			if (!this.selectionPressActive) return;
 			this.selectionPressActive = false;
@@ -1344,6 +1386,7 @@ export class TuiAltScreen extends TuiBase implements ViewportTUI {
 			const isClick =
 				!this.selectionDragged &&
 				this.selectionAnchor.scrollView === point.scrollView &&
+				this.selectionAnchor.overlay === point.overlay &&
 				this.selectionAnchor.row === point.row &&
 				this.selectionAnchor.col === point.col;
 			const clickedUrl = isClick ? this.pressedUrl : undefined;
@@ -1388,11 +1431,12 @@ export class TuiAltScreen extends TuiBase implements ViewportTUI {
 		}
 		this.stopSelectionAutoScroll();
 		this.selectionPressActive = true;
+		const overlay = this.getOverlaySelectionSurfaceAt(event.x, event.y)?.key;
 		const scrollView =
-			!this.hasOverlay() && this.currentLayout
+			!overlay && !this.hasOverlay() && this.currentLayout
 				? getScrollViewsAt(this.currentLayout, event.x, event.y)[0]
 				: undefined;
-		const anchor = this.getSelectionPoint(event, scrollView);
+		const anchor = this.getSelectionPoint(event, scrollView, overlay);
 		const word = this.getWordSelection(anchor);
 		const clickCount = this.getClickCount(anchor, word);
 		const range = clickCount === 2 ? word : clickCount === 3 ? this.getLineSelection(anchor) : undefined;
@@ -1413,6 +1457,7 @@ export class TuiAltScreen extends TuiBase implements ViewportTUI {
 	private getSelectionBounds(): { start: SelectionPoint; end: SelectionPoint } | undefined {
 		if (!this.selectionAnchor || !this.selectionFocus) return undefined;
 		if (this.selectionAnchor.scrollView !== this.selectionFocus.scrollView) return undefined;
+		if (this.selectionAnchor.overlay !== this.selectionFocus.overlay) return undefined;
 		const anchorBeforeFocus =
 			this.selectionAnchor.row < this.selectionFocus.row ||
 			(this.selectionAnchor.row === this.selectionFocus.row && this.selectionAnchor.col < this.selectionFocus.col);
@@ -1452,7 +1497,11 @@ export class TuiAltScreen extends TuiBase implements ViewportTUI {
 		const selection = this.getSelectionBounds();
 		if (!selection) return undefined;
 		let sourceLines: readonly string[] = this.previousScreen;
-		if (selection.start.scrollView) {
+		if (selection.start.overlay) {
+			const surface = this.getOverlaySelectionSurface(selection.start.overlay);
+			if (!surface) return undefined;
+			sourceLines = surface.lines;
+		} else if (selection.start.scrollView) {
 			if (!this.currentLayout) return undefined;
 			const box = getScrollViewBox(this.currentLayout, selection.start.scrollView);
 			if (!box?.scrollContentLines) return undefined;
@@ -1556,7 +1605,11 @@ export class TuiAltScreen extends TuiBase implements ViewportTUI {
 				const endCol = Math.min(maxColumn, box.rect.x + segment.endCol);
 				if (endCol <= startCol) continue;
 				const ranges = rangesByRow.get(row) ?? [];
-				ranges.push({ startCol, endCol, current: matchIndex === search.selectedIndex });
+				ranges.push({
+					startCol,
+					endCol,
+					current: matchIndex === search.selectedIndex,
+				});
 				rangesByRow.set(row, ranges);
 			}
 		}
@@ -1605,7 +1658,26 @@ export class TuiAltScreen extends TuiBase implements ViewportTUI {
 		let maxRow = screen.length - 1;
 		let minColumn = 0;
 		let maxColumn = this.terminal.columns;
-		if (selection.start.scrollView) {
+		if (selection.start.overlay) {
+			const surface = this.getOverlaySelectionSurface(selection.start.overlay);
+			if (!surface) return screen;
+			minRow = surface.row;
+			maxRow = Math.min(screen.length - 1, surface.row + surface.height - 1);
+			minColumn = surface.col;
+			maxColumn = Math.min(this.terminal.columns, surface.col + surface.width);
+			screenSelection = {
+				start: {
+					...selection.start,
+					row: surface.row + selection.start.row,
+					col: surface.col + selection.start.col,
+				},
+				end: {
+					...selection.end,
+					row: surface.row + selection.end.row,
+					col: surface.col + selection.end.col,
+				},
+			};
+		} else if (selection.start.scrollView) {
 			if (!layout) return screen;
 			const box = getScrollViewBox(layout, selection.start.scrollView);
 			if (!box) return screen;

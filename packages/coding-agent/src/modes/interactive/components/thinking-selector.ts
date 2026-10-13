@@ -13,7 +13,7 @@ import {
 } from "@earendil-works/pi-tui";
 import { getSelectListTheme, theme } from "../theme/theme.ts";
 import { DynamicBorder } from "./dynamic-border.ts";
-import { keyDisplayText } from "./keybinding-hints.ts";
+import { dismissHint, keyDisplayText } from "./keybinding-hints.ts";
 
 const THINKING_SELECT_LIST_LAYOUT: SelectListLayoutOptions = {
 	minPrimaryColumnWidth: 12,
@@ -94,7 +94,7 @@ export class ThinkingSelectorComponent extends Container implements Focusable {
 			new Text(
 				theme.fg(
 					"dim",
-					`  ${keyDisplayText("tui.select.confirm")} to select · ${keyDisplayText("app.thinking.save")} to set as default · ${keyDisplayText("tui.select.cancel")} to cancel`,
+					`  ${keyDisplayText("tui.select.confirm")} to select · ${keyDisplayText("app.thinking.save")} to set as default · ${dismissHint()}`,
 				),
 				0,
 				0,

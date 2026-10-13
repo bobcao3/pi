@@ -16,7 +16,7 @@ import type { SessionTreeNode } from "../../../core/session-manager.ts";
 import { formatReadLineRange } from "../../../core/tools/render-utils.ts";
 import { theme } from "../theme/theme.ts";
 import { DynamicBorder } from "./dynamic-border.ts";
-import { formatKeyText, keyHint } from "./keybinding-hints.ts";
+import { dismissHint, formatKeyText, keyHint } from "./keybinding-hints.ts";
 
 /** Gutter info: position (displayIndent where connector was) and whether to show │ */
 interface GutterInfo {
@@ -1030,13 +1030,7 @@ class TreeList implements Component {
 		} else if (kb.matches(keyData, "app.message.copy")) {
 			this.copySelected();
 		} else if (kb.matches(keyData, "tui.select.cancel")) {
-			if (this.searchQuery) {
-				this.searchQuery = "";
-				this.foldedNodes.clear();
-				this.applyFilter();
-			} else {
-				this.onCancel?.();
-			}
+			this.onCancel?.();
 		} else if (kb.matches(keyData, "app.tree.filter.default")) {
 			// Direct filter: default
 			this.filterMode = "default";
@@ -1185,6 +1179,8 @@ class TreeHelp implements Component {
 			if (!text) return label;
 			return labelFirst ? `${label} ${text}` : `${text} ${label}`;
 		});
+		const dismissal = dismissHint();
+		if (dismissal) items.unshift(dismissal);
 
 		const availableWidth = Math.max(1, width);
 		const indent = "  ";
@@ -1301,12 +1297,7 @@ class LabelInput implements Component, Focusable {
 		const availableWidth = width - indent.length;
 		lines.push(truncateToWidth(`${indent}${theme.fg("muted", "Label (empty to remove):")}`, width));
 		lines.push(...this.input.render(availableWidth).map((line) => truncateToWidth(`${indent}${line}`, width)));
-		lines.push(
-			truncateToWidth(
-				`${indent}${keyHint("tui.select.confirm", "save")}  ${keyHint("tui.select.cancel", "cancel")}`,
-				width,
-			),
-		);
+		lines.push(truncateToWidth(`${indent}${dismissHint()}  ${keyHint("tui.select.confirm", "save")}`, width));
 		return lines;
 	}
 

@@ -14,7 +14,7 @@ import { openBrowser } from "../../../utils/open-browser.ts";
 import { theme } from "../theme/theme.ts";
 import { AuthUrlComponent } from "./auth-url.ts";
 import { DynamicBorder } from "./dynamic-border.ts";
-import { keyHint } from "./keybinding-hints.ts";
+import { dismissHint, keyHint } from "./keybinding-hints.ts";
 
 /**
  * Login dialog component - replaces editor during OAuth login flow
@@ -82,6 +82,7 @@ export class LoginDialogComponent extends Container implements Focusable {
 		};
 
 		// Bottom border
+		this.addChild(new Text(dismissHint(), 1, 0));
 		this.addChild(new DynamicBorder());
 	}
 
@@ -205,7 +206,6 @@ export class LoginDialogComponent extends Container implements Focusable {
 		this.contentContainer.addChild(new Spacer(1));
 		this.contentContainer.addChild(new Text(theme.fg("dim", prompt), 1, 0));
 		this.contentContainer.addChild(this.input);
-		this.contentContainer.addChild(new Text(`(${keyHint("tui.select.cancel", "to cancel")})`, 1, 0));
 		this.tui.requestRender();
 
 		return new Promise((resolve, reject) => {
@@ -226,13 +226,7 @@ export class LoginDialogComponent extends Container implements Focusable {
 			this.contentContainer.addChild(new Text(theme.fg("dim", `e.g., ${placeholder}`), 1, 0));
 		}
 		this.contentContainer.addChild(this.input);
-		this.contentContainer.addChild(
-			new Text(
-				`(${keyHint("tui.select.cancel", "to cancel,")} ${keyHint("tui.select.confirm", "to submit")})`,
-				1,
-				0,
-			),
-		);
+		this.contentContainer.addChild(new Text(`(${keyHint("tui.select.confirm", "to submit")})`, 1, 0));
 
 		this.input.setValue("");
 		this.tui.requestRender();
@@ -266,7 +260,7 @@ export class LoginDialogComponent extends Container implements Focusable {
 		}
 		if (showCloseHint) {
 			this.contentContainer.addChild(new Spacer(1));
-			this.contentContainer.addChild(new Text(`(${keyHint("tui.select.cancel", "to close")})`, 1, 0));
+			this.contentContainer.addChild(new Text(dismissHint(), 1, 0));
 		}
 		this.tui.requestRender();
 	}
@@ -277,7 +271,6 @@ export class LoginDialogComponent extends Container implements Focusable {
 	showWaiting(message: string): void {
 		this.contentContainer.addChild(new Spacer(1));
 		this.contentContainer.addChild(new Text(theme.fg("dim", message), 1, 0));
-		this.contentContainer.addChild(new Text(`(${keyHint("tui.select.cancel", "to cancel")})`, 1, 0));
 		this.tui.requestRender();
 	}
 

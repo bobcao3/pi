@@ -43,6 +43,12 @@ export function keyHint(keybinding: Keybinding, description: string): string {
 	return theme.fg("dim", keyText(keybinding)) + theme.fg("muted", ` ${description}`);
 }
 
+export function dismissHint(): string {
+	const keys = getKeybindings().getKeys("tui.select.cancel");
+	const key = keys.includes("escape") ? "ESC" : keys[0];
+	return key ? rawKeyHint(key, "to dismiss") : "";
+}
+
 export function rawKeyHint(key: string, description: string): string {
 	return theme.fg("dim", formatKeyText(key)) + theme.fg("muted", ` ${description}`);
 }

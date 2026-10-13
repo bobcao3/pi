@@ -6,10 +6,12 @@ import {
 	getKeybindings,
 	Input,
 	Spacer,
+	Text,
 	TruncatedText,
 } from "@earendil-works/pi-tui";
 import { theme } from "../theme/theme.ts";
 import { DynamicBorder } from "./dynamic-border.ts";
+import { dismissHint } from "./keybinding-hints.ts";
 
 export type AuthSelectorProvider = {
 	id: string;
@@ -122,6 +124,7 @@ export class OAuthSelectorComponent extends Container implements Focusable {
 		this.addChild(new Spacer(1));
 
 		// Add bottom border
+		this.addChild(new Text(dismissHint(), 1, 0));
 		this.addChild(new DynamicBorder());
 
 		// Initial render

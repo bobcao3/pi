@@ -13,7 +13,7 @@ import {
 import { getDistinctModelName, getModelSearchText } from "../model-search.ts";
 import { theme } from "../theme/theme.ts";
 import { DynamicBorder } from "./dynamic-border.ts";
-import { keyDisplayText } from "./keybinding-hints.ts";
+import { dismissHint, keyDisplayText } from "./keybinding-hints.ts";
 
 // EnabledIds: null = all enabled (no filter), string[] = explicit ordered list
 type EnabledIds = string[] | null;
@@ -200,6 +200,7 @@ export class ScopedModelsSelectorComponent extends Container implements Focusabl
 			? "all enabled"
 			: `${enabledCount}/${this.allIds.length} enabled${unavailableCount ? ` · ${unavailableCount} unavailable` : ""}`;
 		const parts = [
+			dismissHint(),
 			`${keyDisplayText("tui.select.confirm")} toggle`,
 			`${keyDisplayText("app.models.enableAll")} all`,
 			`${keyDisplayText("app.models.clearAll")} clear`,
@@ -387,7 +388,7 @@ export class ScopedModelsSelectorComponent extends Container implements Focusabl
 		}
 
 		// Escape - cancel
-		if (matchesKey(data, Key.escape)) {
+		if (kb.matches(data, "tui.select.cancel")) {
 			this.callbacks.onCancel();
 			return;
 		}
