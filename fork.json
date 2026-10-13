@@ -1,0 +1,12 @@
+{
+	"upstreamRevision": "06a466935536f8c9bcacb2d5efc0fc021be1bdff",
+	"upstreamVersion": "1.2.0",
+	"redistributedPackages": [
+		"@earendil-works/pi-agent-core",
+		"@earendil-works/pi-ai",
+		"@earendil-works/pi-codemode",
+		"@earendil-works/pi-coding-agent",
+		"@earendil-works/pi-durable",
+		"@earendil-works/pi-tui"
+	]
+}
