@@ -42,12 +42,12 @@ export type ScriptErrorJson = string;
 
 export type WorkerToHostMessage =
 	| { type: "call"; id: number; target: "tool" | "global"; name: string; args: string | undefined }
-	| { type: "output"; item: CodemodeOutputItem }
+	| { type: "output"; item: CodemodeOutputItem; schema?: string }
 	/**
 	 * `writes` is a JSON array of `[key, json]` for `store()` and `[key]` for deletions. Deterministic mode: `during`
 	 * is the result the VM was processing when the script finished (0: its first run) and the calls issued by then.
 	 */
-	| { type: "done"; ok: true; value: string | undefined; writes: string; during?: CodemodeDuring }
+	| { type: "done"; ok: true; value: string | undefined; writes: string; during?: CodemodeDuring; schema?: string }
 	| { type: "done"; ok: false; error: ScriptErrorJson; during?: CodemodeDuring }
 	/** The VM failed outside the script's control, for example a wasm trap. */
 	| { type: "crash"; message: string }
@@ -73,6 +73,7 @@ export type HostToWorkerMessage =
 		now?: number;
 		/** Deterministic mode, `ok: false`: a JSON object whose properties the script's `Error` gets. */
 		properties?: string;
+		schema?: string;
 	};
 
 export function isWorkerToHostMessage(value: unknown): value is WorkerToHostMessage {

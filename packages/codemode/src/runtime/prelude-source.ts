@@ -144,15 +144,24 @@ export const PRELUDE_SOURCE: string = `(function (bridge, toolsJson, globalsJson
 	const TypeErrorCtor = TypeError;
 	const RangeErrorCtor = RangeError;
 	const pending = new Map();
+	const schemas = new WeakMap();
+	const getSchema = schemas.get.bind(schemas);
+	const setSchema = schemas.set.bind(schemas);
 	let nextId = 1;
 	let finished = false;
 	// Thrown by exit() to unwind the script after it already reported success.
 	const EXIT = Object.freeze({});
 
-	function done(ok, payload, writes) {
+	function done(ok, payload, writes, schema) {
 		if (finished) return;
 		finished = true;
-		bridge("done", ok, payload, writes);
+		bridge("done", ok, payload, writes, schema);
+	}
+
+	function outputSchema(value, json) {
+		if (value === null || typeof value !== "object") return undefined;
+		const original = getSchema(value);
+		return original && original.json === json ? original.schema : undefined;
 	}
 
 	function serialize(value) {
@@ -339,9 +348,9 @@ export const PRELUDE_SOURCE: string = `(function (bridge, toolsJson, globalsJson
 
 	// Past the output limits the script fails: done() reports the error, so catching it does not
 	// resume output, and the host ends the script.
-	function output(kind, data, mimeType) {
+	function output(kind, data, metadata) {
 		if (finished) return;
-		outputChars += data.length;
+		outputChars += data.length + (kind === "json" && metadata ? metadata.length : 0);
 		outputItems++;
 		if (outputChars > ${MAX_OUTPUT_CHARS} || outputItems > ${MAX_OUTPUT_ITEMS}) {
 			const error = new RangeErrorCtor(
@@ -351,16 +360,19 @@ export const PRELUDE_SOURCE: string = `(function (bridge, toolsJson, globalsJson
 			done(false, describeError(error));
 			throw error;
 		}
-		bridge("output", kind, data, mimeType);
+		bridge("output", kind, data, metadata);
 	}
 
 	// Primitives become their string form, everything else JSON.
 	function outputText(value) {
+		if (value === null || typeof value === "boolean" || typeof value === "number" && Number.isFinite(value)) {
+			return ["json", String(value)];
+		}
 		if (value === undefined || value === null || typeof value !== "object" && typeof value !== "function") {
-			return String(value);
+			return ["text", String(value)];
 		}
 		const json = stringify(value);
-		return json === undefined ? String(value) : json;
+		return json === undefined ? ["text", String(value)] : ["json", json];
 	}
 
 	function text(value) {
@@ -370,7 +382,7 @@ export const PRELUDE_SOURCE: string = `(function (bridge, toolsJson, globalsJson
 		} catch (error) {
 			throw new TypeErrorCtor(error instanceof ErrorCtor ? error.message : String(error));
 		}
-		output("text", rendered);
+		output(rendered[0], rendered[1], outputSchema(value, rendered[1]));
 	}
 
 	function imageUrl(value) {
@@ -456,7 +468,7 @@ export const PRELUDE_SOURCE: string = `(function (bridge, toolsJson, globalsJson
 	Object.defineProperty(globalThis, "exit", { value: exit, enumerable: true });
 
 	return {
-		settle(id, ok, payload, propertiesJson) {
+		settle(id, ok, payload, propertiesJson, schema) {
 			const entry = pending.get(id);
 			if (!entry) return;
 			pending.delete(id);
@@ -479,6 +491,9 @@ export const PRELUDE_SOURCE: string = `(function (bridge, toolsJson, globalsJson
 				entry.reject(error);
 				return;
 			}
+			if (schema !== undefined && value !== null && typeof value === "object") {
+				setSchema(value, { json: payload, schema });
+			}
 			entry.resolve(value);
 		},
 		run(fn) {
@@ -499,7 +514,7 @@ export const PRELUDE_SOURCE: string = `(function (bridge, toolsJson, globalsJson
 						done(false, describeError(error));
 						return;
 					}
-					done(true, json, serializeWrites());
+					done(true, json, serializeWrites(), outputSchema(value, json));
 				},
 				(error) => {
 					done(false, describeError(error));
