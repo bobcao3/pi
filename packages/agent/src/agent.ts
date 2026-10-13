@@ -12,6 +12,7 @@ import {
 	toToolDeclaration,
 } from "@earendil-works/pi-ai";
 import { runAgentLoop, runAgentLoopContinue } from "./agent-loop.ts";
+import { RuntimeActivity, runActivity } from "./runtime-activity.ts";
 import { getDefaultStreamFn } from "./stream-fn.ts";
 import type {
 	AfterToolCallContext,
@@ -186,6 +187,7 @@ type ActiveRun = {
  * and exposes queueing APIs for steering and follow-up messages.
  */
 export class Agent {
+	readonly activity = new RuntimeActivity();
 	private _state: MutableAgentState;
 	private readonly listeners = new Set<(event: AgentEvent, signal: AbortSignal) => Promise<void> | void>();
 	private readonly steeringQueue: PendingMessageQueue;
@@ -468,6 +470,7 @@ export class Agent {
 		let skipInitialSteeringPoll = options.skipInitialSteeringPoll === true;
 		return {
 			model: this._state.model,
+			activity: this.activity,
 			reasoning: this._state.thinkingLevel === "off" ? undefined : this._state.thinkingLevel,
 			sessionId: this.sessionId,
 			onPayload: this.onPayload,
@@ -553,6 +556,7 @@ export class Agent {
 		this._state.pendingToolCalls = new Set<string>();
 		this.activeRun?.resolve();
 		this.activeRun = undefined;
+		this.activity.finishRun();
 	}
 
 	/**
@@ -563,6 +567,7 @@ export class Agent {
 	 * and `finishRun()` clears runtime-owned state.
 	 */
 	private async processEvents(event: AgentEvent): Promise<void> {
+		this.activity.handleEvent(event);
 		switch (event.type) {
 			case "message_start":
 				this._state.streamingMessage = event.message;
@@ -607,7 +612,7 @@ export class Agent {
 			throw new Error("Agent listener invoked outside active run");
 		}
 		for (const listener of this.listeners) {
-			await listener(event, signal);
+			await runActivity(this.activity, "harness", `Dispatch ${event.type}`, () => listener(event, signal));
 		}
 	}
 }

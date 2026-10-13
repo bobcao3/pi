@@ -15,6 +15,7 @@ import {
 	toToolDeclaration,
 	validateToolArguments,
 } from "@earendil-works/pi-ai";
+import { type RuntimeActivity, runActivity } from "./runtime-activity.ts";
 import { getDefaultStreamFn } from "./stream-fn.ts";
 import type {
 	AgentContext,
@@ -183,7 +184,9 @@ async function runLoop(
 		while (hasMoreToolCalls || pendingMessages.length > 0) {
 			let preparedMessages: AgentMessage[] = [];
 			if (lastCompletedTurn) {
-				const nextTurnSnapshot = await config.prepareNextTurn?.(lastCompletedTurn);
+				const nextTurnSnapshot = await runActivity(config.activity, "harness", "Prepare next turn", () =>
+					config.prepareNextTurn?.(lastCompletedTurn!),
+				);
 				if (nextTurnSnapshot) {
 					currentContext = nextTurnSnapshot.context ?? currentContext;
 					preparedMessages = nextTurnSnapshot.messages ?? [];
@@ -216,13 +219,15 @@ async function runLoop(
 			}
 			pendingMessages = [];
 
-			const requestUpdate = await config.prepareRequest?.(
-				{
-					context: currentContext,
-					model: config.model,
-					thinkingLevel: config.reasoning ?? "off",
-				},
-				signal,
+			const requestUpdate = await runActivity(config.activity, "harness", "Prepare request", () =>
+				config.prepareRequest?.(
+					{
+						context: currentContext,
+						model: config.model,
+						thinkingLevel: config.reasoning ?? "off",
+					},
+					signal,
+				),
 			);
 			if (requestUpdate) {
 				currentContext = requestUpdate.context ?? currentContext;
@@ -249,7 +254,9 @@ async function runLoop(
 					context: currentContext,
 					newMessages,
 				};
-				await config.finishTurn?.(lastCompletedTurn, signal);
+				await runActivity(config.activity, "harness", "Finish turn", () =>
+					config.finishTurn?.(lastCompletedTurn!, signal),
+				);
 				await emit({ type: "turn_end", message, toolResults: [] });
 				await emit({ type: "agent_end", messages: newMessages });
 				return;
@@ -283,7 +290,9 @@ async function runLoop(
 				context: currentContext,
 				newMessages,
 			};
-			const decision = await config.finishTurn?.(lastCompletedTurn, signal);
+			const decision = await runActivity(config.activity, "harness", "Finish turn", () =>
+				config.finishTurn?.(lastCompletedTurn!, signal),
+			);
 			await emit({ type: "turn_end", message, toolResults });
 
 			if (decision?.action === "end") {
@@ -388,84 +397,98 @@ async function streamAssistantResponse(
 	// Apply context transform if configured (AgentMessage[] → AgentMessage[])
 	let messages = context.messages;
 	if (config.transformContext) {
-		messages = await config.transformContext(messages, signal);
+		messages = await runActivity(config.activity, "harness", "Transform context", () =>
+			config.transformContext!(messages, signal),
+		);
 	}
 
 	// Convert to LLM-compatible messages (AgentMessage[] → Message[])
-	const llmMessages = await config.convertToLlm(messages);
+	const llmMessages = await runActivity(config.activity, "harness", "Convert transcript", () =>
+		config.convertToLlm(messages),
+	);
 
-	const llmContext = normalizeContext({ messages: llmMessages });
+	const llmContext = await runActivity(config.activity, "harness", "Normalize transcript", () =>
+		normalizeContext({ messages: llmMessages }),
+	);
 
 	// Resolve API key (important for expiring tokens)
 	const resolvedApiKey =
-		(config.getApiKey ? await config.getApiKey(config.model.provider) : undefined) || config.apiKey;
+		(config.getApiKey
+			? await runActivity(config.activity, "harness", "Resolve credentials", () =>
+					config.getApiKey!(config.model.provider),
+				)
+			: undefined) || config.apiKey;
 
-	const response = await streamFunction(config.model, llmContext, {
-		...config,
-		apiKey: resolvedApiKey,
-		signal,
-	});
-	// Record the requested level, whichever stream function answered.
-	const result = async () => Object.assign(await response.result(), { thinkingLevel: config.reasoning ?? "off" });
+	config.activity?.requestStarted();
+	return runActivity(config.activity, "api", config.model.provider, async () => {
+		const response = await streamFunction(config.model, llmContext, {
+			...config,
+			apiKey: resolvedApiKey,
+			signal,
+		});
+		// Record the requested level, whichever stream function answered.
+		const result = async () => Object.assign(await response.result(), { thinkingLevel: config.reasoning ?? "off" });
 
-	let partialMessage: AssistantMessage | null = null;
-	let addedPartial = false;
+		let partialMessage: AssistantMessage | null = null;
+		let addedPartial = false;
 
-	for await (const event of response) {
-		switch (event.type) {
-			case "start":
-				partialMessage = event.partial;
-				context.messages.push(partialMessage);
-				addedPartial = true;
-				await emit({ type: "message_start", message: { ...partialMessage } });
-				break;
-
-			case "text_start":
-			case "text_delta":
-			case "text_end":
-			case "thinking_start":
-			case "thinking_delta":
-			case "thinking_end":
-			case "toolcall_start":
-			case "toolcall_delta":
-			case "toolcall_end":
-				if (partialMessage) {
+		for await (const event of response) {
+			config.activity?.streamEvent(event);
+			switch (event.type) {
+				case "start":
 					partialMessage = event.partial;
-					context.messages[context.messages.length - 1] = partialMessage;
-					await emit({
-						type: "message_update",
-						assistantMessageEvent: event,
-						message: { ...partialMessage },
-					});
-				}
-				break;
+					context.messages.push(partialMessage);
+					addedPartial = true;
+					await emit({ type: "message_start", message: { ...partialMessage } });
+					break;
 
-			case "done":
-			case "error": {
-				const finalMessage = await result();
-				if (addedPartial) {
-					context.messages[context.messages.length - 1] = finalMessage;
-				} else {
-					context.messages.push(finalMessage);
+				case "text_start":
+				case "text_delta":
+				case "text_end":
+				case "thinking_start":
+				case "thinking_delta":
+				case "thinking_end":
+				case "toolcall_start":
+				case "toolcall_delta":
+				case "toolcall_end":
+					if (partialMessage) {
+						partialMessage = event.partial;
+						context.messages[context.messages.length - 1] = partialMessage;
+						await emit({
+							type: "message_update",
+							assistantMessageEvent: event,
+							message: { ...partialMessage },
+						});
+					}
+					break;
+
+				case "done":
+				case "error": {
+					const finalMessage = await result();
+					if (addedPartial) {
+						context.messages[context.messages.length - 1] = finalMessage;
+					} else {
+						context.messages.push(finalMessage);
+					}
+					if (!addedPartial) {
+						await emit({ type: "message_start", message: { ...finalMessage } });
+					}
+					await emit({ type: "message_end", message: finalMessage });
+					return finalMessage;
 				}
-				if (!addedPartial) {
-					await emit({ type: "message_start", message: { ...finalMessage } });
-				}
-				await emit({ type: "message_end", message: finalMessage });
-				return finalMessage;
 			}
 		}
-	}
 
-	const finalMessage = await result();
-	if (addedPartial) {
-		context.messages[context.messages.length - 1] = finalMessage;
-	} else {
-		context.messages.push(finalMessage);
-		await emit({ type: "message_start", message: { ...finalMessage } });
-	}
-	await emit({ type: "message_end", message: finalMessage });
-	return finalMessage;
+		const finalMessage = await result();
+		if (addedPartial) {
+			context.messages[context.messages.length - 1] = finalMessage;
+		} else {
+			context.messages.push(finalMessage);
+			await emit({ type: "message_start", message: { ...finalMessage } });
+		}
+		await emit({ type: "message_end", message: finalMessage });
+		return finalMessage;
+	});
 }
 
 /**
@@ -546,7 +569,9 @@ async function executeToolCallsSequential(
 			args: toolCall.arguments,
 		});
 
-		const preparation = await prepareToolCall(currentContext, assistantMessage, toolCall, config, signal);
+		const preparation = await runActivity(config.activity, "harness", `Prepare tool ${toolCall.name}`, () =>
+			prepareToolCall(currentContext, assistantMessage, toolCall, config, signal),
+		);
 		let finalized: FinalizedToolCallOutcome;
 		if (preparation.kind === "immediate") {
 			finalized = {
@@ -555,7 +580,12 @@ async function executeToolCallsSequential(
 				isError: preparation.isError,
 			};
 		} else {
-			const executed = await executePreparedToolCall(preparation, signal, emitToolExecutionUpdate(toolCall, emit));
+			const executed = await executePreparedToolCall(
+				preparation,
+				signal,
+				emitToolExecutionUpdate(toolCall, emit),
+				config.activity,
+			);
 			finalized = await finalizeExecutedToolCall(
 				currentContext,
 				assistantMessage,
@@ -601,7 +631,9 @@ async function executeToolCallsParallel(
 			args: toolCall.arguments,
 		});
 
-		const preparation = await prepareToolCall(currentContext, assistantMessage, toolCall, config, signal);
+		const preparation = await runActivity(config.activity, "harness", `Prepare tool ${toolCall.name}`, () =>
+			prepareToolCall(currentContext, assistantMessage, toolCall, config, signal),
+		);
 		if (preparation.kind === "immediate") {
 			const finalized = {
 				toolCall,
@@ -626,7 +658,12 @@ async function executeToolCallsParallel(
 				await emitToolExecutionEnd(finalized, emit);
 				return finalized;
 			}
-			const executed = await executePreparedToolCall(preparation, signal, emitToolExecutionUpdate(toolCall, emit));
+			const executed = await executePreparedToolCall(
+				preparation,
+				signal,
+				emitToolExecutionUpdate(toolCall, emit),
+				config.activity,
+			);
 			const finalized = await finalizeExecutedToolCall(
 				currentContext,
 				assistantMessage,
@@ -681,7 +718,7 @@ type ExecutedToolCallOutcome = {
 type FinalizedToolCallOutcome = AgentToolCallOutcome;
 
 /** The `beforeToolCall` and `afterToolCall` hooks of {@link AgentLoopConfig}. */
-export type ToolCallHooks = Pick<AgentLoopConfig, "beforeToolCall" | "afterToolCall">;
+export type ToolCallHooks = Pick<AgentLoopConfig, "beforeToolCall" | "afterToolCall" | "activity">;
 
 type ToolUpdateSink = (partialResult: AgentToolResult<any>) => Promise<void> | void;
 
@@ -726,14 +763,16 @@ async function prepareToolCall(
 		const preparedToolCall = prepareToolCallArguments(tool, toolCall);
 		const validatedArgs = validateToolArguments(tool, preparedToolCall);
 		if (config.beforeToolCall) {
-			const beforeResult = await config.beforeToolCall(
-				{
-					assistantMessage,
-					toolCall,
-					args: validatedArgs,
-					context: currentContext,
-				},
-				signal,
+			const beforeResult = await runActivity(config.activity, "harness", `Before tool ${toolCall.name}`, () =>
+				config.beforeToolCall!(
+					{
+						assistantMessage,
+						toolCall,
+						args: validatedArgs,
+						context: currentContext,
+					},
+					signal,
+				),
 			);
 			if (signal?.aborted) {
 				return {
@@ -810,11 +849,18 @@ export interface RunToolCallOptions extends ToolCallHooks {
  */
 export async function runToolCall(toolCall: AgentToolCall, options: RunToolCallOptions): Promise<AgentToolCallOutcome> {
 	const { assistantMessage, context, signal } = options;
-	const preparation = await prepareToolCall(context, assistantMessage, toolCall, options, signal, options.tools);
+	const preparation = await runActivity(options.activity, "harness", `Prepare tool ${toolCall.name}`, () =>
+		prepareToolCall(context, assistantMessage, toolCall, options, signal, options.tools),
+	);
 	if (preparation.kind === "immediate") {
 		return { toolCall, result: preparation.result, isError: preparation.isError };
 	}
-	const executed = await executePreparedToolCall(preparation, signal, options.onUpdate ?? (() => {}));
+	const executed = await executePreparedToolCall(
+		preparation,
+		signal,
+		options.onUpdate ?? (() => {}),
+		options.activity,
+	);
 	return finalizeExecutedToolCall(context, assistantMessage, preparation, executed, options, signal);
 }
 
@@ -822,6 +868,7 @@ async function executePreparedToolCall(
 	prepared: PreparedToolCall,
 	signal: AbortSignal | undefined,
 	onUpdate: ToolUpdateSink,
+	activity?: RuntimeActivity,
 ): Promise<ExecutedToolCallOutcome> {
 	const updateEvents: Promise<void>[] = [];
 	let acceptingUpdates = true;
@@ -829,23 +876,24 @@ async function executePreparedToolCall(
 	const elapsed = () => Math.round(performance.now() - startedAt);
 
 	try {
-		const result = await prepared.tool.execute(
-			prepared.toolCall.id,
-			prepared.args as never,
-			signal,
-			(partialResult) => {
+		const result = await runActivity(activity, "tool", prepared.tool.name, () =>
+			prepared.tool.execute(prepared.toolCall.id, prepared.args as never, signal, (partialResult) => {
 				if (!acceptingUpdates) return;
 				updateEvents.push(Promise.resolve(onUpdate(partialResult)));
-			},
+			}),
 		);
 		const durationMs = elapsed();
 		acceptingUpdates = false;
-		await Promise.all(updateEvents);
+		await runActivity(activity, "harness", `Drain tool updates · ${prepared.tool.name}`, () =>
+			Promise.all(updateEvents),
+		);
 		return { result, isError: result.isError === true, durationMs };
 	} catch (error) {
 		const durationMs = elapsed();
 		acceptingUpdates = false;
-		await Promise.all(updateEvents);
+		await runActivity(activity, "harness", `Drain tool updates · ${prepared.tool.name}`, () =>
+			Promise.all(updateEvents),
+		);
 		return {
 			result: createErrorToolResult(error instanceof Error ? error.message : String(error)),
 			isError: true,
@@ -869,16 +917,18 @@ async function finalizeExecutedToolCall(
 
 	if (config.afterToolCall) {
 		try {
-			const afterResult = await config.afterToolCall(
-				{
-					assistantMessage,
-					toolCall: prepared.toolCall,
-					args: prepared.args,
-					result,
-					isError,
-					context: currentContext,
-				},
-				signal,
+			const afterResult = await runActivity(config.activity, "harness", `After tool ${prepared.tool.name}`, () =>
+				config.afterToolCall!(
+					{
+						assistantMessage,
+						toolCall: prepared.toolCall,
+						args: prepared.args,
+						result,
+						isError,
+						context: currentContext,
+					},
+					signal,
+				),
 			);
 			if (afterResult) {
 				// Structured content not replaced along with the content may no longer match it.
