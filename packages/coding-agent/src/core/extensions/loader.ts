@@ -32,6 +32,7 @@ import type {
 	MessageRenderer,
 	ProviderConfig,
 	RegisteredCommand,
+	ThinkingRenderer,
 	ToolDefinition,
 	ToolRendererResolver,
 } from "./types.ts";
@@ -362,6 +363,11 @@ function createExtensionAPI(
 		registerMarkdownTransformer(transformer: MarkdownTransformer): void {
 			assertActive();
 			extension.markdownTransformer = transformer;
+		},
+
+		registerThinkingRenderer(renderer: ThinkingRenderer): void {
+			assertActive();
+			extension.thinkingRenderer = renderer;
 		},
 
 		registerEntryRenderer<T>(customType: string, renderer: EntryRenderer<T>): void {

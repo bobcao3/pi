@@ -3525,6 +3525,10 @@ export class InteractiveMode {
 						this.hiddenThinkingLabel,
 						this.outputPad,
 						this.getMarkdownTransformers(),
+						undefined,
+						undefined,
+						this.session.extensionRunner.getThinkingRenderer(),
+						() => this.ui.requestRender(),
 					);
 					this.streamingMessage = event.message;
 					this.chatContainer.addChild(this.streamingComponent);
@@ -4001,6 +4005,8 @@ export class InteractiveMode {
 					this.getMarkdownTransformers(),
 					options?.messageId,
 					options?.timestamp,
+					this.session.extensionRunner.getThinkingRenderer(),
+					() => this.ui.requestRender(),
 				);
 				this.chatContainer.addChild(assistantComponent);
 				break;
