@@ -15,7 +15,7 @@ import {
 import type { ExtensionCommandContext } from "../../core/extensions/types.ts";
 import type { KeybindingsManager } from "../../core/keybindings.ts";
 import { DynamicBorder } from "../../modes/interactive/components/dynamic-border.ts";
-import { keyHint } from "../../modes/interactive/components/keybinding-hints.ts";
+import { dismissHint, keyHint } from "../../modes/interactive/components/keybinding-hints.ts";
 import type { Theme } from "../../modes/interactive/theme/theme.ts";
 import type { LlamaModelInfo, LlamaProgress } from "./client.ts";
 import type { HuggingFaceModel } from "./huggingface.ts";
@@ -350,7 +350,7 @@ class LlamaView implements LlamaUi, Focusable {
 					this.theme,
 					"llama.cpp models",
 					[new Text(this.theme.fg("dim", serverUrl), 1, 0), new Spacer(1), list],
-					`${keyHint("tui.select.confirm", "load/unload/download")} • ${keyHint("tui.select.cancel", "close")}`,
+					`${keyHint("tui.select.confirm", "load/unload/download")} • ${dismissHint()}`,
 				),
 				list,
 			);
@@ -371,7 +371,7 @@ class LlamaView implements LlamaUi, Focusable {
 					this.theme,
 					title,
 					[new Spacer(1), list],
-					`${keyHint("tui.select.confirm", "select")} • ${keyHint("tui.select.cancel", "cancel")}`,
+					`${keyHint("tui.select.confirm", "select")} • ${dismissHint()}`,
 				),
 				list,
 			);
@@ -404,7 +404,7 @@ class LlamaView implements LlamaUi, Focusable {
 					this.theme,
 					"Download model",
 					[new Spacer(1), component],
-					`${keyHint("tui.select.confirm", "select")} • ${keyHint("tui.select.cancel", "back")}`,
+					`${keyHint("tui.select.confirm", "select")} • ${dismissHint()}`,
 				),
 				component,
 				component,
@@ -449,7 +449,7 @@ class LlamaView implements LlamaUi, Focusable {
 			);
 		}
 		if (state.detail) body.push(new Text(this.theme.fg("dim", state.detail), 1, 0));
-		this.content = frame(this.theme, state.title, body, keyHint("tui.select.cancel", "stop"));
+		this.content = frame(this.theme, state.title, body, dismissHint());
 		this.inputHandler = undefined;
 		this.tui.requestRender();
 	}

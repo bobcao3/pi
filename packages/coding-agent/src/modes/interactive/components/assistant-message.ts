@@ -3,6 +3,7 @@ import { Container, Markdown, type MarkdownTheme, MouseRegion, Spacer, Text } fr
 import type { MarkdownTransformer } from "../../../core/extensions/types.ts";
 import { getMarkdownTheme, theme } from "../theme/theme.ts";
 import { createMarkdownTransform } from "./markdown-transform.ts";
+import { ThinkingBlock } from "./thinking-block.ts";
 
 const OSC133_ZONE_START = "\x1b]133;A\x07";
 const OSC133_ZONE_END = "\x1b]133;B\x07";
@@ -141,25 +142,14 @@ export class AssistantMessageComponent extends Container {
 
 				const runIndex = thinkingRunIndex++;
 				const hidden = this.thinkingVisibilityOverrides.get(runIndex) ?? this.hideThinkingBlock;
-				const thinkingComponent = hidden
-					? new Text(theme.italic(theme.fg("thinkingText", this.hiddenThinkingLabel)), this.outputPad, 0)
-					: new Markdown(
-							thinkingBlocks.join("\n\n"),
-							this.outputPad,
-							0,
-							this.markdownTheme,
-							{
-								color: (text: string) => theme.fg("thinkingText", text),
-								italic: true,
-							},
-							{
-								transform: createMarkdownTransform(
-									"assistant-thinking",
-									this.isStreaming,
-									this.markdownTransformers,
-								),
-							},
-						);
+				const thinkingComponent = new ThinkingBlock(
+					thinkingBlocks.join("\n\n"),
+					hidden,
+					this.hiddenThinkingLabel,
+					this.markdownTheme,
+					this.isStreaming,
+					this.markdownTransformers,
+				);
 				this.contentContainer.addChild(
 					new MouseRegion(thinkingComponent, (event) => {
 						if (event.type !== "click" || event.button !== "left") return undefined;

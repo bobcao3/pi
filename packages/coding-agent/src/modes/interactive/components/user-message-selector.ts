@@ -1,6 +1,7 @@
 import { type Component, Container, getKeybindings, Spacer, Text, truncateToWidth } from "@earendil-works/pi-tui";
 import { theme } from "../theme/theme.ts";
 import { DynamicBorder } from "./dynamic-border.ts";
+import { dismissHint } from "./keybinding-hints.ts";
 
 interface UserMessageItem {
 	id: string; // Entry ID in the session
@@ -138,6 +139,7 @@ export class UserMessageSelectorComponent extends Container {
 		this.messageList.onCancel = onCancel;
 
 		this.addChild(this.messageList);
+		this.addChild(new Text(dismissHint(), 1, 0));
 
 		// Add bottom border
 		this.addChild(new Spacer(1));

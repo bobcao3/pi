@@ -22,7 +22,7 @@ import { BUILTIN_PATH_PREFIX } from "../../../core/source-info.ts";
 import { canonicalizePath, isLocalPath, resolvePath } from "../../../utils/paths.ts";
 import { theme } from "../theme/theme.ts";
 import { DynamicBorder } from "./dynamic-border.ts";
-import { keyHint, rawKeyHint } from "./keybinding-hints.ts";
+import { dismissHint, keyHint, rawKeyHint } from "./keybinding-hints.ts";
 
 type ResourceType = "extensions" | "skills" | "prompts" | "themes";
 type ConfigWriteScope = "global" | "project";
@@ -211,7 +211,7 @@ class ConfigSelectorHeader implements Component {
 		const switchHint = this.projectModeAvailable ? keyHint("tui.input.tab", "switch mode") + sep : "";
 		const actionHint =
 			this.writeScope === "project" ? rawKeyHint("space", "cycle inherit/+/-") : rawKeyHint("space", "toggle");
-		const hint = switchHint + actionHint + sep + rawKeyHint("esc", "close");
+		const hint = switchHint + actionHint;
 		const spacing = Math.max(1, width - visibleWidth(title) - visibleWidth(hint));
 		const scopeHint =
 			this.writeScope === "project"
@@ -220,7 +220,7 @@ class ConfigSelectorHeader implements Component {
 
 		return [
 			truncateToWidth(`${title}${" ".repeat(spacing)}${hint}`, width, ""),
-			truncateToWidth(scopeHint, width, ""),
+			truncateToWidth(dismissHint() + sep + scopeHint, width, ""),
 		];
 	}
 }

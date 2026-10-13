@@ -338,10 +338,19 @@ type RenderedOverlayLayout = {
 	col: number;
 	width: number;
 	height: number;
+	lines: readonly string[];
+};
+
+type OverlaySelectionSurface = OverlayBounds & {
+	key: object;
+	lines: readonly string[];
 };
 
 type OverlayBlockedFocusResume = { status: "restore-overlay" } | { status: "focus-target"; target: Component | null };
-type EligibleOverlayFocusRestoreState = { status: "eligible"; overlay: OverlayStackEntry };
+type EligibleOverlayFocusRestoreState = {
+	status: "eligible";
+	overlay: OverlayStackEntry;
+};
 type BlockedOverlayFocusRestoreState = {
 	status: "blocked";
 	overlay: OverlayStackEntry;
@@ -357,7 +366,10 @@ type OverlayFocusRestorePolicy = "clear" | "preserve";
  */
 export class Container implements Component {
 	children: Component[] = [];
-	private mouseLayout?: { width: number; children: Array<{ component: Component; height: number }> };
+	private mouseLayout?: {
+		width: number;
+		children: Array<{ component: Component; height: number }>;
+	};
 
 	addChild(component: Component): void {
 		this.children.push(component);
@@ -385,7 +397,10 @@ export class Container implements Component {
 		const mouseChildren =
 			this.mouseLayout?.width === event.width
 				? this.mouseLayout.children
-				: this.children.map((component) => ({ component, height: component.render(event.width).length }));
+				: this.children.map((component) => ({
+						component,
+						height: component.render(event.width).length,
+					}));
 		let childY = 0;
 		for (const { component: child, height: childHeight } of mouseChildren) {
 			if (event.y >= childY && event.y < childY + childHeight) {
@@ -538,7 +553,9 @@ export abstract class TuiBase extends Container implements TUI {
 	get hasOverlayEntries(): boolean {
 		return this.overlayStack.length > 0;
 	}
-	private overlayFocusRestore: OverlayFocusRestoreState = { status: "inactive" };
+	private overlayFocusRestore: OverlayFocusRestoreState = {
+		status: "inactive",
+	};
 
 	constructor(terminal: Terminal, showHardwareCursor?: boolean, logDirectory?: string) {
 		super();
@@ -660,7 +677,10 @@ export abstract class TuiBase extends Container implements TUI {
 			? this.overlayStack.find((entry) => entry.component === nextFocus && this.isOverlayVisible(entry))
 			: undefined;
 		if (focusedOverlay) {
-			this.overlayFocusRestore = { status: "eligible", overlay: focusedOverlay };
+			this.overlayFocusRestore = {
+				status: "eligible",
+				overlay: focusedOverlay,
+			};
 		}
 	}
 
@@ -870,32 +890,56 @@ export abstract class TuiBase extends Container implements TUI {
 	}
 
 	/** Dispatch to the visually topmost overlay under the pointer. */
-	protected dispatchMouseToOverlay(event: TuiMouseEvent): { hit: boolean; result?: TuiMouseDispatchResult } {
+	protected dispatchMouseToOverlay(event: TuiMouseEvent): {
+		hit: boolean;
+		result?: TuiMouseDispatchResult;
+	} {
+		const layout = this.getRenderedOverlayLayoutAt(event.screenX, event.screenY);
+		if (!layout) return { hit: false };
+		const result = dispatchMouseEvent(layout.entry.component, {
+			...event,
+			x: event.screenX - layout.col,
+			y: event.screenY - layout.row,
+			width: layout.width,
+			height: layout.height,
+		});
+		return result
+			? {
+					hit: true,
+					result: result.focus ? { ...result, focusTarget: layout.entry.component } : result,
+				}
+			: { hit: true };
+	}
+
+	private getRenderedOverlayLayoutAt(x: number, y: number): RenderedOverlayLayout | undefined {
 		for (let index = this.renderedOverlayLayouts.length - 1; index >= 0; index--) {
 			const layout = this.renderedOverlayLayouts[index]!;
-			if (
-				event.screenX < layout.col ||
-				event.screenX >= layout.col + layout.width ||
-				event.screenY < layout.row ||
-				event.screenY >= layout.row + layout.height
-			) {
-				continue;
+			if (x >= layout.col && x < layout.col + layout.width && y >= layout.row && y < layout.row + layout.height) {
+				return layout;
 			}
-			const result = dispatchMouseEvent(layout.entry.component, {
-				...event,
-				x: event.screenX - layout.col,
-				y: event.screenY - layout.row,
-				width: layout.width,
-				height: layout.height,
-			});
-			return result
-				? {
-						hit: true,
-						result: result.focus ? { ...result, focusTarget: layout.entry.component } : result,
-					}
-				: { hit: true };
 		}
-		return { hit: false };
+		return undefined;
+	}
+
+	private toOverlaySelectionSurface(layout: RenderedOverlayLayout): OverlaySelectionSurface {
+		return {
+			key: layout.entry,
+			row: layout.row,
+			col: layout.col,
+			width: layout.width,
+			height: layout.height,
+			lines: layout.lines,
+		};
+	}
+
+	protected getOverlaySelectionSurfaceAt(x: number, y: number): OverlaySelectionSurface | undefined {
+		const layout = this.getRenderedOverlayLayoutAt(x, y);
+		return layout ? this.toOverlaySelectionSurface(layout) : undefined;
+	}
+
+	protected getOverlaySelectionSurface(key: object): OverlaySelectionSurface | undefined {
+		const layout = this.renderedOverlayLayouts.find((candidate) => candidate.entry === key);
+		return layout ? this.toOverlaySelectionSurface(layout) : undefined;
 	}
 
 	/** Check if an overlay entry is currently visible */
@@ -1097,7 +1141,10 @@ export abstract class TuiBase extends Container implements TUI {
 			if (topVisible) {
 				this.setFocus(topVisible.component);
 			} else {
-				this.setFocusInternal({ component: focusedOverlay.preFocus, overlayFocusRestore: "preserve" });
+				this.setFocusInternal({
+					component: focusedOverlay.preFocus,
+					overlayFocusRestore: "preserve",
+				});
 			}
 		}
 
@@ -1166,7 +1213,11 @@ export abstract class TuiBase extends Container implements TUI {
 
 	private terminalColorQueryResult(query: PendingTerminalColorQuery): TerminalColors {
 		const palette = query.palette.every((color) => color !== undefined) ? (query.palette as RgbColor[]) : undefined;
-		return { foreground: query.foreground, background: query.background, palette };
+		return {
+			foreground: query.foreground,
+			background: query.background,
+			palette,
+		};
 	}
 
 	private completeTerminalColorQuery(query: PendingTerminalColorQuery): void {
@@ -1217,13 +1268,23 @@ export abstract class TuiBase extends Container implements TUI {
 		overlayHeight: number,
 		termWidth: number,
 		termHeight: number,
-	): { width: number; row: number; col: number; maxHeight: number | undefined } {
+	): {
+		width: number;
+		row: number;
+		col: number;
+		maxHeight: number | undefined;
+	} {
 		const opt = options ?? {};
 
 		// Parse margin (clamp to non-negative)
 		const margin =
 			typeof opt.margin === "number"
-				? { top: opt.margin, right: opt.margin, bottom: opt.margin, left: opt.margin }
+				? {
+						top: opt.margin,
+						right: opt.margin,
+						bottom: opt.margin,
+						left: opt.margin,
+					}
 				: (opt.margin ?? {});
 		const marginTop = Math.max(0, margin.top ?? 0);
 		const marginRight = Math.max(0, margin.right ?? 0);
@@ -1357,7 +1418,13 @@ export abstract class TuiBase extends Container implements TUI {
 		for (const entry of this.overlayStack) entry.bounds = undefined;
 
 		// Pre-render all visible overlays and calculate positions
-		const rendered: { entry: OverlayStackEntry; overlayLines: string[]; row: number; col: number; w: number }[] = [];
+		const rendered: {
+			entry: OverlayStackEntry;
+			overlayLines: string[];
+			row: number;
+			col: number;
+			w: number;
+		}[] = [];
 		let minLinesNeeded = result.length;
 
 		const visibleEntries = this.overlayStack.filter((e) => this.isOverlayVisible(e));
@@ -1390,6 +1457,7 @@ export abstract class TuiBase extends Container implements TUI {
 			col,
 			width: w,
 			height: overlayLines.length,
+			lines: overlayLines,
 		}));
 
 		// Pad to at least terminal height so overlays have screen-relative positions.

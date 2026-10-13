@@ -3,7 +3,7 @@ import { APP_NAME } from "../../../config.ts";
 import { SYSTEM_THEME_NAME } from "../theme/system-theme.ts";
 import { theme } from "../theme/theme.ts";
 import { DynamicBorder } from "./dynamic-border.ts";
-import { keyHint, rawKeyHint } from "./keybinding-hints.ts";
+import { dismissHint, keyHint, rawKeyHint } from "./keybinding-hints.ts";
 
 export interface FirstTimeSetupResult {
 	theme: string;
@@ -94,7 +94,7 @@ export class FirstTimeSetupComponent extends Container {
 					"  " +
 					keyHint("tui.select.confirm", this.step === "theme" ? "continue" : "finish") +
 					"  " +
-					keyHint("tui.select.cancel", "skip setup"),
+					dismissHint(),
 				1,
 				0,
 			),
@@ -127,7 +127,9 @@ export class FirstTimeSetupComponent extends Container {
 
 	handleInput(keyData: string): void {
 		const kb = getKeybindings();
-		if (kb.matches(keyData, "tui.select.up") || keyData === "k") {
+		if (kb.matches(keyData, "tui.select.cancel")) {
+			this.options.onCancel();
+		} else if (kb.matches(keyData, "tui.select.up") || keyData === "k") {
 			this.moveSelection(-1);
 		} else if (kb.matches(keyData, "tui.select.down") || keyData === "j") {
 			this.moveSelection(1);
@@ -141,8 +143,6 @@ export class FirstTimeSetupComponent extends Container {
 					shareAnalytics: ANALYTICS_OPTIONS[this.analyticsIndex].value,
 				});
 			}
-		} else if (kb.matches(keyData, "tui.select.cancel")) {
-			this.options.onCancel();
 		}
 	}
 }

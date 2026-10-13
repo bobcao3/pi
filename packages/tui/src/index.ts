@@ -40,6 +40,7 @@ export {
 export { Box } from "./components/box.ts";
 export { CancellableLoader } from "./components/cancellable-loader.ts";
 export { Editor, type EditorOptions, type EditorTheme } from "./components/editor.ts";
+export { GutterText, type GutterTextRow } from "./components/gutter-text.ts";
 export { HStack } from "./components/h-stack.ts";
 export {
 	Image,
@@ -113,6 +114,7 @@ export { getNativeClipboard, type NativeClipboard } from "./native-platform.ts";
 export { oklabToOkhslLightness } from "./oklab.ts";
 // Program status reporting (OSC 7501)
 export { formatProgramStatus, type ProgramStatus } from "./program-status.ts";
+export { COMPACT_WIDTH_THRESHOLD, isCompactWidth } from "./responsive.ts";
 // Input buffering for batch splitting
 export { StdinBuffer, type StdinBufferEventMap, type StdinBufferOptions } from "./stdin-buffer.ts";
 // Terminal interface and implementations
@@ -147,6 +149,7 @@ export {
 	type ImageProtocol,
 	type ImageRenderOptions,
 	imageFallback,
+	isImageLine,
 	renderImage,
 	resetCapabilitiesCache,
 	setCapabilities,
@@ -159,6 +162,7 @@ export {
 	Container,
 	CURSOR_MARKER,
 	compositeTuiLine,
+	dispatchMouseEvent,
 	type Focusable,
 	isFocusable,
 	isViewportTUI,
@@ -175,6 +179,7 @@ export {
 	type TuiInputListenerResult,
 	type TuiMode,
 	type TuiMouseButton,
+	type TuiMouseDispatchResult,
 	type TuiMouseEvent,
 	type TuiMouseEventResult,
 	type TuiMouseEventType,
