@@ -17,7 +17,7 @@ import type { KeybindingsManager } from "../../../core/keybindings.ts";
 import { editInExternalEditor } from "../external-editor.ts";
 import { getEditorTheme, theme } from "../theme/theme.ts";
 import { DynamicBorder } from "./dynamic-border.ts";
-import { keyHint } from "./keybinding-hints.ts";
+import { dismissHint, keyHint } from "./keybinding-hints.ts";
 
 export interface ExtensionEditorOptions extends EditorOptions {
 	description?: string;
@@ -94,7 +94,7 @@ export class ExtensionEditorComponent extends Container implements Focusable {
 			"  " +
 			keyHint("tui.input.newLine", "newline") +
 			"  " +
-			keyHint("tui.select.cancel", "cancel") +
+			dismissHint() +
 			`  ${keyHint("app.editor.external", "external editor")}`;
 		this.addChild(new Text(hint, 1, 0));
 

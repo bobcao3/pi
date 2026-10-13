@@ -20,7 +20,7 @@ import type { ExtensionCommandContext } from "../../core/extensions/types.ts";
 import type { KeybindingsManager } from "../../core/keybindings.ts";
 import { AuthUrlComponent } from "../../modes/interactive/components/auth-url.ts";
 import { DynamicBorder } from "../../modes/interactive/components/dynamic-border.ts";
-import { keyHint } from "../../modes/interactive/components/keybinding-hints.ts";
+import { dismissHint, keyHint } from "../../modes/interactive/components/keybinding-hints.ts";
 import { getSelectListTheme, type Theme } from "../../modes/interactive/theme/theme.ts";
 
 export interface McpMenu {
@@ -122,15 +122,12 @@ export class McpManagerView implements McpUi, Component, Focusable {
 				if (menu.details) body.push(new Text(this.theme.fg("muted", menu.details), 1, 0));
 				if (menu.error) body.push(new Text(this.theme.fg("error", menu.error), 1, 0));
 				body.push(new Spacer(1));
-				const footer = `${keyHint("tui.select.confirm", menu.confirmLabel)} • ${keyHint("tui.select.cancel", menu.cancelLabel)}`;
+				const footer = `${keyHint("tui.select.confirm", menu.confirmLabel)} • ${dismissHint()}`;
 				if (menu.items.length === 0) {
 					body.push(new Text(this.theme.fg("muted", menu.empty ?? "Nothing to show."), 1, 0));
-					this.setContent(
-						frame(this.theme, menu.title, body, keyHint("tui.select.cancel", menu.cancelLabel)),
-						(data) => {
-							if (this.keybindings.matches(data, "tui.select.cancel")) finish(undefined);
-						},
-					);
+					this.setContent(frame(this.theme, menu.title, body, dismissHint()), (data) => {
+						if (this.keybindings.matches(data, "tui.select.cancel")) finish(undefined);
+					});
 					return;
 				}
 				const list = new SelectList(
@@ -162,7 +159,7 @@ export class McpManagerView implements McpUi, Component, Focusable {
 			this.setContent(frame(this.theme, title, body));
 			return;
 		}
-		this.setContent(frame(this.theme, title, body, keyHint("tui.select.cancel", "cancel")), (data) => {
+		this.setContent(frame(this.theme, title, body, dismissHint()), (data) => {
 			if (this.keybindings.matches(data, "tui.select.cancel")) onCancel();
 		});
 	}
@@ -197,12 +194,7 @@ export class McpManagerView implements McpUi, Component, Focusable {
 				input,
 			];
 			this.setContent(
-				frame(
-					this.theme,
-					title,
-					body,
-					`${keyHint("tui.select.confirm", "submit")} • ${keyHint("tui.select.cancel", "cancel")}`,
-				),
+				frame(this.theme, title, body, `${keyHint("tui.select.confirm", "submit")} • ${dismissHint()}`),
 				(data) => {
 					if (this.keybindings.matches(data, "tui.select.confirm")) {
 						const value = input.getValue().trim();

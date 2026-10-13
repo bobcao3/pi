@@ -11,6 +11,7 @@ import {
 	Text,
 } from "@earendil-works/pi-tui";
 import { getSelectListTheme, theme } from "../theme/theme.ts";
+import { dismissHint, keyHint } from "./keybinding-hints.ts";
 
 const SUBMENU_SELECT_LIST_LAYOUT: SelectListLayoutOptions = {
 	minPrimaryColumnWidth: 12,
@@ -85,10 +86,12 @@ export class SelectSubmenu extends Container {
 
 		// Hint
 		this.addChild(new Spacer(1));
-		const hint = submenuOptions?.searchable
-			? "  Type to filter \u00b7 Enter to select \u00b7 Esc to go back"
-			: "  Enter to select \u00b7 Esc to go back";
-		this.addChild(new Text(theme.fg("dim", hint), 0, 0));
+		const hint =
+			(submenuOptions?.searchable ? theme.fg("dim", "  Type to filter · ") : "  ") +
+			keyHint("tui.select.confirm", "to select") +
+			" · " +
+			dismissHint();
+		this.addChild(new Text(hint, 0, 0));
 	}
 
 	private buildSelectList(options: SelectItem[], preselect: string): SelectList {
@@ -118,13 +121,16 @@ export class SelectSubmenu extends Container {
 	}
 
 	handleInput(data: string): void {
+		const kb = getKeybindings();
+		if (kb.matches(data, "tui.select.cancel")) {
+			this.onCancelCb();
+			return;
+		}
 		if (this.searchInput) {
-			const kb = getKeybindings();
 			const isNav =
 				kb.matches(data, "tui.select.up") ||
 				kb.matches(data, "tui.select.down") ||
-				kb.matches(data, "tui.select.confirm") ||
-				kb.matches(data, "tui.select.cancel");
+				kb.matches(data, "tui.select.confirm");
 			if (isNav) {
 				this.selectList.handleInput(data);
 			} else {

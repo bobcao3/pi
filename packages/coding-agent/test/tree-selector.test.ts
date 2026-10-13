@@ -286,6 +286,40 @@ describe("TreeSelectorComponent", () => {
 		});
 	});
 
+	test("Escape dismisses a filtered tree while label Escape only cancels label editing", () => {
+		const tree = buildTree([userMessage("user-1", null, "needle"), assistantMessage("asst-1", "user-1", "response")]);
+		tree[0]!.label = "checkpoint";
+		const events: string[] = [];
+		const selector = new TreeSelectorComponent(
+			tree,
+			"asst-1",
+			24,
+			(id) => events.push(`select:${id}`),
+			() => events.push("cancel"),
+			(id, label) => events.push(`label:${id}:${label}`),
+		);
+		const list = selector.getTreeList();
+
+		selector.handleInput("needle");
+		expect(list.getSelectedNode()?.entry.id).toBe("user-1");
+		expect(selector.render(100).map(stripVTControlCharacters).join("\n")).not.toContain("response");
+
+		selector.handleInput("L");
+		selector.handleInput("edited");
+		expect(selector.render(100).map(stripVTControlCharacters).join("\n")).toContain("Label (empty to remove):");
+		selector.handleInput("\x1b");
+		expect(events).toEqual([]);
+		expect(list.getSearchQuery()).toBe("needle");
+		expect(list.getSelectedNode()?.label).toBe("checkpoint");
+		expect(selector.render(100).map(stripVTControlCharacters).join("\n")).not.toContain("Label (empty to remove):");
+
+		selector.handleInput("\x1b");
+		expect(events).toEqual(["cancel"]);
+		expect(list.getSearchQuery()).toBe("needle");
+		expect(list.getSelectedNode()?.entry.id).toBe("user-1");
+		expect(list.getSelectedNode()?.label).toBe("checkpoint");
+	});
+
 	describe("help", () => {
 		test("renders semantic help rows without truncating narrow terminal controls", () => {
 			const entries = [userMessage("user-1", null, "hello"), assistantMessage("asst-1", "user-1", "hi")];
@@ -691,7 +725,7 @@ describe("TreeSelectorComponent", () => {
 			expect(list.getSelectedNode()?.entry.id).toBe("user-3b");
 
 			selector.handleInput("b"); // search resets folds
-			selector.handleInput("\x1b"); // clear search
+			selector.handleInput("\x7f"); // Clear the search with Backspace.
 
 			// Navigate to user-3a to verify fold was reset
 			let currentId = "";

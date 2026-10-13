@@ -7,7 +7,7 @@ import { Container, getKeybindings, Spacer, Text, type TUI } from "@earendil-wor
 import { theme } from "../theme/theme.ts";
 import { CountdownTimer } from "./countdown-timer.ts";
 import { DynamicBorder } from "./dynamic-border.ts";
-import { keyHint, rawKeyHint } from "./keybinding-hints.ts";
+import { dismissHint, keyHint, rawKeyHint } from "./keybinding-hints.ts";
 
 export interface ExtensionSelectorOptions {
 	tui?: TUI;
@@ -67,11 +67,7 @@ export class ExtensionSelectorComponent extends Container {
 		this.addChild(new Spacer(1));
 		this.addChild(
 			new Text(
-				rawKeyHint("↑↓", "navigate") +
-					"  " +
-					keyHint("tui.select.confirm", "select") +
-					"  " +
-					keyHint("tui.select.cancel", "cancel"),
+				`${rawKeyHint("↑↓", "navigate")}  ${keyHint("tui.select.confirm", "select")}  ${dismissHint()}`,
 				1,
 				0,
 			),

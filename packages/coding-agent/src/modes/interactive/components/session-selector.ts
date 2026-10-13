@@ -18,7 +18,7 @@ import type { SessionInfo, SessionListProgress } from "../../../core/session-man
 import { canonicalizePath as _canonicalizePath } from "../../../utils/paths.ts";
 import { theme } from "../theme/theme.ts";
 import { DynamicBorder } from "./dynamic-border.ts";
-import { keyHint, keyText } from "./keybinding-hints.ts";
+import { dismissHint, keyHint, keyText } from "./keybinding-hints.ts";
 import { filterAndSortSessions, hasSessionName, type NameFilter, type SortMode } from "./session-selector-search.ts";
 
 type SessionScope = "current" | "all";
@@ -156,18 +156,22 @@ class SessionSelectorHeader implements Component {
 		let hintLine1: string;
 		let hintLine2: string;
 		if (this.confirmingDeletePath !== null) {
-			const confirmHint = `Delete session? ${keyHint("tui.select.confirm", "confirm")} · ${keyHint("tui.select.cancel", "cancel")}`;
+			const confirmHint = `Delete session? ${keyHint("tui.select.confirm", "confirm")}`;
 			hintLine1 = theme.fg("error", truncateToWidth(confirmHint, width, "…"));
-			hintLine2 = "";
+			hintLine2 = truncateToWidth(dismissHint(), width, "");
 		} else if (this.statusMessage) {
 			const color = this.statusMessage.type === "error" ? "error" : "accent";
 			hintLine1 = theme.fg(color, truncateToWidth(this.statusMessage.message, width, "…"));
-			hintLine2 = "";
+			hintLine2 = truncateToWidth(dismissHint(), width, "");
 		} else {
 			const pathState = this.showPath ? "(on)" : "(off)";
 			const sep = theme.fg("muted", " · ");
 			const hint1 =
-				keyHint("tui.input.tab", "scope") + sep + theme.fg("muted", 're:<pattern> regex · "phrase" exact');
+				dismissHint() +
+				sep +
+				keyHint("tui.input.tab", "scope") +
+				sep +
+				theme.fg("muted", 're:<pattern> regex · "phrase" exact');
 			const hint2Parts = [
 				keyHint("app.session.toggleSort", "sort"),
 				keyHint("app.session.toggleNamedFilter", "named"),
@@ -894,11 +898,7 @@ export class SessionSelectorComponent extends Container implements Focusable {
 		panel.addChild(this.renameInput);
 		panel.addChild(new Spacer(1));
 		panel.addChild(
-			new Text(
-				theme.fg("muted", `${keyText("tui.select.confirm")} to save · ${keyText("tui.select.cancel")} to cancel`),
-				1,
-				0,
-			),
+			new Text(dismissHint() + theme.fg("muted", " · ") + keyHint("tui.select.confirm", "to save"), 1, 0),
 		);
 
 		this.buildBaseLayout(panel, { showHeader: false });

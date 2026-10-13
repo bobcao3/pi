@@ -112,9 +112,7 @@ export class SettingsList implements Component {
 
 		if (this.items.length === 0) {
 			lines.push(this.theme.hint("  No settings available"));
-			if (this.searchEnabled) {
-				this.addHintLine(lines, width);
-			}
+			this.addHintLine(lines, width);
 			return lines;
 		}
 
@@ -313,13 +311,16 @@ export class SettingsList implements Component {
 	}
 
 	private addHintLine(lines: string[], width: number): void {
+		const keys = getKeybindings().getKeys("tui.select.cancel");
+		const key = keys.includes("escape") ? "ESC" : keys[0];
+		const dismiss = key ? `${key} to dismiss · ` : "";
 		lines.push("");
 		lines.push(
 			truncateToWidth(
 				this.theme.hint(
 					this.searchEnabled
-						? "  Type to search · Enter/Space to change · Esc to cancel"
-						: "  Enter/Space to change · Esc to cancel",
+						? `  ${dismiss}Type to search · Enter/Space to change`
+						: `  ${dismiss}Enter/Space to change`,
 				),
 				width,
 			),

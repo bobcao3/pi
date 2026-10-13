@@ -1,6 +1,7 @@
-import { Container, type SelectItem, SelectList, type SelectListLayoutOptions } from "@earendil-works/pi-tui";
+import { Container, type SelectItem, SelectList, type SelectListLayoutOptions, Text } from "@earendil-works/pi-tui";
 import { getSelectListTheme } from "../theme/theme.ts";
 import { DynamicBorder } from "./dynamic-border.ts";
+import { dismissHint } from "./keybinding-hints.ts";
 
 const SHOW_IMAGES_SELECT_LIST_LAYOUT: SelectListLayoutOptions = {
 	minPrimaryColumnWidth: 12,
@@ -39,6 +40,7 @@ export class ShowImagesSelectorComponent extends Container {
 		};
 
 		this.addChild(this.selectList);
+		this.addChild(new Text(dismissHint(), 1, 0));
 
 		// Add bottom border
 		this.addChild(new DynamicBorder());
