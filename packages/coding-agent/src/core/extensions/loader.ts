@@ -180,9 +180,12 @@ export function createExtensionRuntime(): ExtensionRuntime {
 		// registerTool() is valid during extension load; refresh is only needed post-bind.
 		refreshTools: () => {},
 		getCommands: notInitialized,
+		runCommand: notInitialized,
 		setModel: () => Promise.reject(new Error("Extension runtime not initialized")),
 		getThinkingLevel: notInitialized,
 		setThinkingLevel: notInitialized,
+		setDefaultModel: notInitialized,
+		setDefaultThinkingLevel: notInitialized,
 		flagValues: new Map(),
 		pendingProviderRegistrations: [],
 		pendingNativeProviderRegistrations: [],
@@ -438,6 +441,11 @@ function createExtensionAPI(
 			return runtime.getCommands();
 		},
 
+		runCommand(text: string): Promise<boolean> {
+			assertActive();
+			return runtime.runCommand(text);
+		},
+
 		setModel(model) {
 			assertActive();
 			return runtime.setModel(model);
@@ -451,6 +459,16 @@ function createExtensionAPI(
 		setThinkingLevel(level) {
 			assertActive();
 			runtime.setThinkingLevel(level);
+		},
+
+		setDefaultModel(provider, modelId) {
+			assertActive();
+			runtime.setDefaultModel(provider, modelId);
+		},
+
+		setDefaultThinkingLevel(level) {
+			assertActive();
+			runtime.setDefaultThinkingLevel(level);
 		},
 
 		registerProvider(providerOrName: Provider | string, config?: ProviderConfig) {
@@ -571,7 +589,7 @@ async function loadExtensionModule(extensionPath: string, cacheToken?: Extension
 	const resolutionOptions = usesEmbeddedModules
 		? { virtualModules: await getVirtualModules(), tryNative: false }
 		: isTypeScriptSourceRuntime
-			? { virtualModules: await getVirtualModules(), tsconfigPaths: true }
+			? { virtualModules: await getVirtualModules(), tsconfigPaths: true, tryNative: false }
 			: { alias: getAliases() };
 	const jiti = createJitiImpl(import.meta.url, {
 		moduleCache: false,

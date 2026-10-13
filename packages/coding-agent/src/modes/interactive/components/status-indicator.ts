@@ -48,6 +48,21 @@ export class WorkingStatusIndicator extends StatusIndicator {
 	}
 }
 
+export class RuntimeStatusIndicator extends WorkingStatusIndicator {
+	override setIndicator(indicator?: WorkingIndicatorOptions): void {
+		super.setIndicator(
+			indicator ?? {
+				frames: ["●", "◉", "○", "◉"].map((frame) => theme.fg("muted", frame)),
+				intervalMs: 160,
+			},
+		);
+	}
+
+	override render(width: number): string[] {
+		return [this.renderInBorder(width)];
+	}
+}
+
 export class RetryStatusIndicator extends StatusIndicator {
 	private countdown: CountdownTimer | undefined;
 

@@ -23,6 +23,7 @@ import {
 	getSelfUpdateCommand,
 	getSelfUpdateUnavailableInstruction,
 	PACKAGE_NAME,
+	SELF_UPDATE_ALLOWED,
 	type SelfUpdateCommand,
 	type SelfUpdatePackageTarget,
 	VERSION,
@@ -682,6 +683,9 @@ interface SelfUpdatePlan {
 }
 
 async function getSelfUpdatePlan(force: boolean): Promise<SelfUpdatePlan> {
+	if (!SELF_UPDATE_ALLOWED) {
+		throw new Error("Self-update is disabled by this application's manifest.");
+	}
 	let latestRelease: Awaited<ReturnType<typeof getLatestPiRelease>>;
 	try {
 		latestRelease = await getLatestPiRelease(VERSION, { retry: true });

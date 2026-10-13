@@ -746,6 +746,7 @@ export class AgentSession {
 					});
 				}
 				return runToolCall(toolCall, {
+					activity: this.agent.activity,
 					tools: this._getCallableTools(),
 					assistantMessage,
 					context: { messages: this.agent.state.messages, tools: this.agent.state.tools },
@@ -3383,6 +3384,7 @@ export class AgentSession {
 	}
 
 	private _bindExtensionCore(runner: ExtensionRunner): void {
+		runner.activity = this.agent.activity;
 		const getCommands = (): SlashCommandInfo[] => {
 			const extensionCommands: SlashCommandInfo[] = runner.getRegisteredCommands().map((command) => ({
 				name: command.invocationName,
@@ -3450,6 +3452,7 @@ export class AgentSession {
 				setActiveTools: (toolNames) => this.setActiveToolsByName(toolNames),
 				refreshTools: () => this._refreshToolRegistry(),
 				getCommands,
+				runCommand: (text) => this._extensionCommandContextActions?.runCommand?.(text) ?? Promise.resolve(false),
 				setModel: async (model) => {
 					if (!this._modelRuntime.hasConfiguredAuth(model.provider)) return false;
 					await this.setModel(model);
@@ -3457,6 +3460,12 @@ export class AgentSession {
 				},
 				getThinkingLevel: () => this.thinkingLevel,
 				setThinkingLevel: (level) => this.setThinkingLevel(level),
+				setDefaultModel: (provider, modelId) => {
+					this.settingsManager.setDefaultModelAndProvider(provider, modelId);
+				},
+				setDefaultThinkingLevel: (level) => {
+					this.settingsManager.setDefaultThinkingLevel(level);
+				},
 			},
 			{
 				getModel: () => this.model,

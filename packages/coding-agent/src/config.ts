@@ -526,7 +526,7 @@ export function getCodemodeWorkerSpecifier(): string | URL | undefined {
 	return codemodeWorkerDataUrl;
 }
 
-export type InstallChange = { kind: "updated"; version: string } | { kind: "removed" };
+export type InstallChange = { kind: "updated"; previousVersion: string; version: string } | { kind: "removed" };
 
 /**
  * Detect that the package this process runs from changed on disk, for example after `pi update`
@@ -544,8 +544,8 @@ export function detectInstallChange(packageJsonPath = startupPackageJsonPath): I
 	} catch (error) {
 		return (error as NodeJS.ErrnoException).code === "ENOENT" ? { kind: "removed" } : undefined;
 	}
-	return installed.version && installed.version !== VERSION
-		? { kind: "updated", version: installed.version }
+	return pkg.version && installed.version && installed.version !== pkg.version
+		? { kind: "updated", previousVersion: pkg.version, version: installed.version }
 		: undefined;
 }
 
@@ -559,6 +559,7 @@ interface PackageJson {
 	piConfig?: {
 		name?: string;
 		configDir?: string;
+		selfUpdate?: boolean;
 	};
 }
 
@@ -574,12 +575,24 @@ try {
 	if (err.code !== "ENOENT") throw e;
 }
 
-const piConfigName: string | undefined = pkg.piConfig?.name;
-export const PACKAGE_NAME: string = pkg.name || "@earendil-works/pi-coding-agent";
+const applicationManifest = process.env.PI_APPLICATION_MANIFEST;
+const application: PackageJson = applicationManifest
+	? JSON.parse(stripBom(readFileSync(normalizePath(applicationManifest), "utf-8")))
+	: pkg;
+const piConfigName: string | undefined = application.piConfig?.name;
+export const PACKAGE_NAME: string = application.name || "@earendil-works/pi-coding-agent";
 export const APP_NAME: string = piConfigName || "pi";
 export const APP_TITLE: string = piConfigName ? APP_NAME : "π";
-export const CONFIG_DIR_NAME: string = pkg.piConfig?.configDir || ".pi";
-export const VERSION: string = pkg.version || "0.0.0";
+export const CONFIG_DIR_NAME: string = application.piConfig?.configDir || ".pi";
+export const VERSION: string = application.version || "0.0.0";
+/**
+ * Version the bundled CHANGELOG.md reflects. The changelog ships with this package, so it tracks this
+ * package's version rather than the host application's. A host such as cpi carries its own version, and
+ * comparing the changelog against that version would mark every entry as new. The prerelease suffix is
+ * dropped so the value stays comparable to the `x.y.z` headings in CHANGELOG.md.
+ */
+export const CHANGELOG_VERSION: string = (pkg.version ?? VERSION).replace(/[-+].*$/, "");
+export const SELF_UPDATE_ALLOWED = application.piConfig?.selfUpdate !== false;
 
 // e.g., PI_CODING_AGENT_DIR or TAU_CODING_AGENT_DIR
 export const ENV_AGENT_DIR = `${APP_NAME.toUpperCase()}_CODING_AGENT_DIR`;
