@@ -82,6 +82,7 @@ import type {
 	SessionBeforeTreeResult,
 	SessionBoundaryDraft,
 	SessionShutdownEvent,
+	ThinkingRenderer,
 	ToolCallEvent,
 	ToolCallEventResult,
 	ToolRenderers,
@@ -802,6 +803,10 @@ export class ExtensionRunner {
 
 	getMarkdownTransformers(): MarkdownTransformer[] {
 		return this.extensions.flatMap((ext) => (ext.markdownTransformer ? [ext.markdownTransformer] : []));
+	}
+
+	getThinkingRenderer(): ThinkingRenderer | undefined {
+		return this.extensions.find((ext) => ext.thinkingRenderer)?.thinkingRenderer;
 	}
 
 	/** Renderers of calls to `toolName`: extension resolvers in load order, then `base`. */

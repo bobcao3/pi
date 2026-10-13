@@ -3570,6 +3570,8 @@ export class InteractiveMode {
 						this.hiddenThinkingLabel,
 						this.outputPad,
 						this.getMarkdownTransformers(),
+						this.session.extensionRunner.getThinkingRenderer(),
+						() => this.ui.requestRender(),
 					);
 					this.streamingMessage = event.message;
 					this.chatContainer.addChild(this.streamingComponent);
@@ -4037,6 +4039,8 @@ export class InteractiveMode {
 					this.hiddenThinkingLabel,
 					this.outputPad,
 					this.getMarkdownTransformers(),
+					this.session.extensionRunner.getThinkingRenderer(),
+					() => this.ui.requestRender(),
 				);
 				this.chatContainer.addChild(assistantComponent);
 				break;
