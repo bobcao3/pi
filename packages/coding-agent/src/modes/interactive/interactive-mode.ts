@@ -57,12 +57,14 @@ import { spawn } from "child_process";
 import {
 	APP_NAME,
 	APP_TITLE,
+	CHANGELOG_VERSION,
 	CONFIG_DIR_NAME,
 	detectInstallChange,
 	getAgentDir,
 	getAuthPath,
 	getDebugLogPath,
 	getDocsPath,
+	SELF_UPDATE_ALLOWED,
 	VERSION,
 } from "../../config.ts";
 import { type AgentSession, type AgentSessionEvent, parseSkillBlock } from "../../core/agent-session.ts";
@@ -92,7 +94,7 @@ import type {
 	UserBashEventResult,
 	WorkingIndicatorOptions,
 } from "../../core/extensions/index.ts";
-import { FooterDataProvider, type ReadonlyFooterDataProvider } from "../../core/footer-data-provider.ts";
+import { FooterDataProvider } from "../../core/footer-data-provider.ts";
 import { configureHttpDispatcher, formatHttpIdleTimeoutMs } from "../../core/http-dispatcher.ts";
 import { type AppKeybinding, KeybindingsManager } from "../../core/keybindings.ts";
 import type { McpHttpServerConfig } from "../../core/mcp-servers.ts";
@@ -117,10 +119,12 @@ import type { FullscreenExitOutput, TuiMode } from "../../core/settings-manager.
 import { BUILTIN_SLASH_COMMANDS } from "../../core/slash-commands.ts";
 import type { SourceInfo } from "../../core/source-info.ts";
 import { isInstallTelemetryEnabled } from "../../core/telemetry.ts";
+import { MAX_TOOL_EXECUTION_BATCH_CALLS } from "../../core/tool-execution.ts";
 import { withBuiltInRenderers } from "../../core/tools/renderers/index.ts";
 import type { TruncationResult } from "../../core/tools/truncate.ts";
 import { hasTrustRequiringProjectResources, ProjectTrustStore } from "../../core/trust-manager.ts";
 import { getUsageCostBreakdown } from "../../core/usage-totals.ts";
+import type { VcsSourceFactory } from "../../core/vcs-source.ts";
 import { addMcpServerConfig, loadMcpConfig } from "../../extensions/mcp/config.ts";
 import { getChangelogPath, getNewEntries, normalizeChangelogLinks, parseChangelog } from "../../utils/changelog.ts";
 import { copyToClipboard, readClipboardFilePaths, readClipboardText } from "../../utils/clipboard.ts";
@@ -139,6 +143,7 @@ import { ArminComponent } from "./components/armin.ts";
 import { AssistantMessageComponent } from "./components/assistant-message.ts";
 import { BashExecutionComponent } from "./components/bash-execution.ts";
 import { BranchSummaryMessageComponent } from "./components/branch-summary-message.ts";
+import { CollapsibleMarkdown } from "./components/collapsible-markdown.ts";
 import { CompactionSummaryMessageComponent } from "./components/compaction-summary-message.ts";
 import { CustomEditor } from "./components/custom-editor.ts";
 import { CustomEntryComponent } from "./components/custom-entry.ts";
@@ -171,12 +176,13 @@ import {
 	CompactionStatusIndicator,
 	IdleStatus,
 	RetryStatusIndicator,
+	RuntimeStatusIndicator,
 	type StatusIndicator,
-	WorkingStatusIndicator,
 } from "./components/status-indicator.ts";
 import { ThemedText } from "./components/themed-text.ts";
 import { ThinkingSelectorComponent } from "./components/thinking-selector.ts";
-import { ToolExecutionComponent } from "./components/tool-execution.ts";
+import { ToolExecutionComponent, type ToolExecutionOptions } from "./components/tool-execution.ts";
+import { ToolExecutionBatchComponent } from "./components/tool-execution-batch.ts";
 import { TreeSelectorComponent } from "./components/tree-selector.ts";
 import { TrustSelectorComponent } from "./components/trust-selector.ts";
 import { UserMessageComponent } from "./components/user-message.ts";
@@ -185,6 +191,7 @@ import { editInExternalEditor } from "./external-editor.ts";
 import { refreshModelCatalogs } from "./model-catalog-refresh.ts";
 import { getModelSearchText } from "./model-search.ts";
 import { type BlockedStatus, ProgramStatusReporter } from "./program-status-reporter.ts";
+import { RuntimeStatusView } from "./runtime-status.ts";
 import { shareSession } from "./session-share.ts";
 import {
 	getAvailableThemes,
@@ -202,6 +209,9 @@ import {
 } from "./theme/theme.ts";
 import { InteractiveThemeController } from "./theme/theme-controller.ts";
 import { createInteractiveTui, createInteractiveTuiReference } from "./tui-renderer.ts";
+
+/** Visual lines of the startup changelog shown before `app.tools.expand` reveals the rest. */
+const CHANGELOG_PREVIEW_LINES = 7;
 
 export { createInteractiveTui, createInteractiveTuiReference } from "./tui-renderer.ts";
 
@@ -426,6 +436,7 @@ function formatLoginProviderCompletionDescription(provider: LoginProviderComplet
  * Options for InteractiveMode initialization.
  */
 export interface InteractiveModeOptions {
+	createVcsSource?: VcsSourceFactory;
 	/** Providers that were migrated to auth.json (shows warning) */
 	migratedProviders?: string[];
 	/** Diagnostics collected before the interactive TUI was initialized. */
@@ -471,6 +482,7 @@ export class InteractiveMode {
 	private editorContainer: Container;
 	private activeSelectorToken?: object;
 	private activeSelectorDispose?: () => void;
+	private selectorWaiters: Array<() => void> = [];
 	private footer: FooterComponent;
 	private footerContainer: Container;
 	private footerDataProvider: FooterDataProvider;
@@ -484,6 +496,8 @@ export class InteractiveMode {
 	private activeWorkingIndicatorEmbedded = false;
 	private readonly idleStatus = new IdleStatus();
 	private workingMessage: string | undefined = undefined;
+	private runtimeMessage: string | undefined;
+	private runtimeStatus: RuntimeStatusView | undefined;
 	private workingVisible = true;
 	private workingIndicatorOptions: WorkingIndicatorOptions | undefined = undefined;
 	private readonly defaultWorkingMessage = "Working";
@@ -509,6 +523,7 @@ export class InteractiveMode {
 
 	// Tool execution tracking: toolCallId -> component
 	private pendingTools = new Map<string, ToolExecutionComponent>();
+	private readonly toolBatches = new Map<string, ToolExecutionBatchComponent>();
 
 	// Tool output expansion state
 	private toolOutputExpanded = false;
@@ -655,7 +670,7 @@ export class InteractiveMode {
 		this.editor = this.defaultEditor;
 		this.editorContainer = new Container();
 		this.editorContainer.addChild(this.editor as Component);
-		this.footerDataProvider = new FooterDataProvider(this.sessionManager.getCwd());
+		this.footerDataProvider = new FooterDataProvider(this.sessionManager.getCwd(), options.createVcsSource);
 		this.footer = new FooterComponent(this.session, this.footerDataProvider);
 		this.footer.setAutoCompactEnabled(this.session.autoCompactionEnabled);
 		this.footerContainer = new Container();
@@ -862,10 +877,19 @@ export class InteractiveMode {
 			const condensedText = `Updated to v${latestVersion}. Use ${theme.bold("/changelog")} to view full changelog.`;
 			this.chatContainer.addChild(new Text(condensedText, 1, 0));
 		} else {
-			this.chatContainer.addChild(new ThemedText(() => theme.bold(theme.fg("accent", "What's New")), 1, 0));
+			this.chatContainer.addChild(new ThemedText(() => theme.bold(theme.fg("accent", "What's New in Pi")), 1, 0));
 			this.chatContainer.addChild(new Spacer(1));
 			this.chatContainer.addChild(
-				new Markdown(this.changelogMarkdown.trim(), 1, 0, this.getMarkdownThemeWithSettings()),
+				new CollapsibleMarkdown({
+					markdown: this.changelogMarkdown.trim(),
+					collapsedLines: CHANGELOG_PREVIEW_LINES,
+					paddingX: 1,
+					paddingY: 0,
+					theme: this.getMarkdownThemeWithSettings(),
+					expanded: this.getStartupExpansionState(),
+					formatHint: (hidden) =>
+						`${theme.fg("muted", `... (${hidden} more lines,`)} ${keyHint("app.tools.expand", "to expand")}${theme.fg("muted", ")")}`,
+				}),
 			);
 			this.chatContainer.addChild(new Spacer(1));
 		}
@@ -983,8 +1007,8 @@ export class InteractiveMode {
 		this.fullscreenLayoutRoot = viewport.root;
 		this.mountInteractiveTui(this.renderer, [
 			this.documentContainer,
-			this.pendingMessagesContainer,
 			this.statusContainer,
+			this.pendingMessagesContainer,
 			this.widgetContainerAbove,
 			this.editorContainer,
 			this.widgetContainerBelow,
@@ -1158,11 +1182,13 @@ export class InteractiveMode {
 		}
 
 		// Start version check asynchronously
-		checkForNewPiVersion(this.version).then((newRelease) => {
-			if (newRelease) {
-				this.showNewVersionNotification(newRelease);
-			}
-		});
+		if (SELF_UPDATE_ALLOWED) {
+			checkForNewPiVersion(this.version).then((newRelease) => {
+				if (newRelease) {
+					this.showNewVersionNotification(newRelease);
+				}
+			});
+		}
 
 		// Start package update check asynchronously
 		this.checkForPackageUpdates()
@@ -1343,14 +1369,14 @@ export class InteractiveMode {
 
 		if (!lastVersion) {
 			// Fresh install - record the version, send telemetry, don't show changelog
-			this.settingsManager.setLastChangelogVersion(VERSION);
+			this.settingsManager.setLastChangelogVersion(CHANGELOG_VERSION);
 			this.reportInstallTelemetry(VERSION);
 			return undefined;
 		}
 
 		const newEntries = getNewEntries(entries, lastVersion);
 		if (newEntries.length > 0) {
-			this.settingsManager.setLastChangelogVersion(VERSION);
+			this.settingsManager.setLastChangelogVersion(CHANGELOG_VERSION);
 			this.reportInstallTelemetry(VERSION);
 			return newEntries.map((e) => normalizeChangelogLinks(e.content, e)).join("\n\n");
 		}
@@ -1980,6 +2006,7 @@ export class InteractiveMode {
 			},
 			commandContextActions: {
 				waitForIdle: () => this.session.waitForIdle(),
+				runCommand: (text) => this.runCommand(text),
 				newSession: async (options) => {
 					this.clearStatusIndicator();
 					try {
@@ -2011,6 +2038,7 @@ export class InteractiveMode {
 						return { cancelled: true };
 					}
 
+					this.disposeToolViews();
 					this.chatContainer.clear();
 					this.renderInitialMessages();
 					if (result.editorText && !this.editor.getText().trim()) {
@@ -2070,7 +2098,6 @@ export class InteractiveMode {
 		}
 		this.footer.setSession(this.session);
 		this.footer.setAutoCompactEnabled(this.session.autoCompactionEnabled);
-		this.footerDataProvider.setCwd(this.sessionManager.getCwd());
 		this.hideThinkingBlock = this.settingsManager.getHideThinkingBlock();
 		this.outputPad = this.settingsManager.getOutputPad();
 		this.ui.setShowHardwareCursor(this.settingsManager.getShowHardwareCursor());
@@ -2091,9 +2118,23 @@ export class InteractiveMode {
 
 	private async rebindCurrentSession(options: { renderBeforeBind?: boolean } = {}): Promise<void> {
 		const session = this.session;
+		this.footerDataProvider.setProject({ cwd: this.sessionManager.getCwd() });
 
 		this.unsubscribe?.();
 		this.unsubscribe = undefined;
+		this.runtimeStatus?.dispose();
+		this.runtimeMessage = undefined;
+		this.runtimeStatus = new RuntimeStatusView(session.agent.activity, (message, immediate) => {
+			this.runtimeMessage = message;
+			if (!this.workingVisible || (this.activeStatusIndicator && this.activeStatusIndicator.kind !== "working"))
+				return;
+			if (message) {
+				if (!this.activeStatusIndicator) this.showWorkingStatusIndicator();
+				else this.activeStatusIndicator.setMessage(this.getWorkingMessage());
+			} else this.clearStatusIndicator("working");
+			if (immediate && this.isInitialized) this.ui.renderNow();
+			else this.ui.requestRender();
+		});
 		this.programStatus.reset();
 		this.applyRuntimeSettings();
 
@@ -2199,8 +2240,8 @@ export class InteractiveMode {
 		this.installChangeWarningShown = true;
 		const cause =
 			change.kind === "updated"
-				? `${APP_NAME} was updated to ${change.version} while this session was running (${VERSION})`
-				: `The ${APP_NAME} installation this session runs from was removed or replaced`;
+				? `The Pi runtime changed from ${change.previousVersion} to ${change.version} while this ${APP_NAME} session was running`
+				: `The Pi runtime installation used by this ${APP_NAME} session was removed or replaced`;
 		const resumeCommand = formatResumeCommand(this.sessionManager);
 		const restart = resumeCommand
 			? `Restart with \`${resumeCommand}\` to continue this session.`
@@ -2211,6 +2252,7 @@ export class InteractiveMode {
 
 	private renderCurrentSessionState(): void {
 		this.loadedResourcesContainer.clear();
+		this.disposeToolViews();
 		this.chatContainer.clear();
 		this.pendingMessagesContainer.clear();
 		this.compactionQueuedMessages = [];
@@ -2345,17 +2387,16 @@ export class InteractiveMode {
 		}
 	}
 
+	private getWorkingMessage(): string {
+		return this.runtimeMessage
+			? `${this.runtimeMessage}${this.workingMessage ? ` · ${this.workingMessage}` : ""}`
+			: (this.workingMessage ?? this.defaultWorkingMessage);
+	}
+
 	private showWorkingStatusIndicator(): void {
-		const colorFn = isEmbeddedStatus(this.editor)
-			? (text: string) =>
-					(this.editor.borderColor ?? theme.getThinkingBorderColor(this.session.thinkingLevel || "off"))(text)
-			: undefined;
 		this.showStatusIndicator(
-			new WorkingStatusIndicator(
-				this.ui,
-				this.workingMessage ?? this.defaultWorkingMessage,
-				this.workingIndicatorOptions,
-				colorFn,
+			new RuntimeStatusIndicator(this.ui, this.getWorkingMessage(), this.workingIndicatorOptions, (text) =>
+				theme.fg("muted", text),
 			),
 		);
 	}
@@ -2367,7 +2408,7 @@ export class InteractiveMode {
 			this.ui.requestRender();
 			return;
 		}
-		if (this.session.isStreaming && this.activeStatusIndicator?.kind !== "working") {
+		if ((this.session.isStreaming || this.runtimeMessage) && this.activeStatusIndicator?.kind !== "working") {
 			this.showWorkingStatusIndicator();
 		}
 		this.ui.requestRender();
@@ -2462,6 +2503,7 @@ export class InteractiveMode {
 		this.ui.hideOverlay();
 		this.clearExtensionTerminalInputListeners();
 		this.setExtensionFooter(undefined);
+		this.footerDataProvider.setProject({ cwd: this.sessionManager.getCwd() });
 		this.setExtensionHeader(undefined);
 		this.clearExtensionWidgets();
 		this.footerDataProvider.clearExtensionStatuses();
@@ -2521,11 +2563,7 @@ export class InteractiveMode {
 	/**
 	 * Set a custom footer component, or restore the built-in footer.
 	 */
-	private setExtensionFooter(
-		factory:
-			| ((tui: TUI, thm: Theme, footerData: ReadonlyFooterDataProvider) => Component & { dispose?(): void })
-			| undefined,
-	): void {
+	private setExtensionFooter(factory: Parameters<ExtensionUIContext["setFooter"]>[0]): void {
 		// Dispose existing custom footer
 		if (this.customFooter?.dispose) {
 			this.customFooter.dispose();
@@ -2534,7 +2572,7 @@ export class InteractiveMode {
 		this.footerContainer.clear();
 		if (factory) {
 			// Create and add custom footer, passing the data provider
-			this.customFooter = factory(this.ui, theme, this.footerDataProvider);
+			this.customFooter = factory(this.ui, theme, this.footerDataProvider, this.footer);
 			this.footerContainer.addChild(this.customFooter);
 		} else {
 			// Restore built-in footer
@@ -2641,7 +2679,7 @@ export class InteractiveMode {
 			setWorkingMessage: (message) => {
 				this.workingMessage = message;
 				if (this.activeStatusIndicator?.kind === "working") {
-					this.activeStatusIndicator.setMessage(message ?? this.defaultWorkingMessage);
+					this.activeStatusIndicator.setMessage(this.getWorkingMessage());
 				}
 			},
 			setWorkingVisible: (visible) => this.setWorkingVisible(visible),
@@ -2649,6 +2687,10 @@ export class InteractiveMode {
 			setHiddenThinkingLabel: (label) => this.setHiddenThinkingLabel(label),
 			setWidget: (key, content, options) => this.setExtensionWidget(key, content, options),
 			setFooter: (factory) => this.setExtensionFooter(factory),
+			setFooterProject: (project) => {
+				this.footerDataProvider.setProject(project ?? { cwd: this.sessionManager.getCwd() });
+				this.ui.requestRender();
+			},
 			setHeader: (factory) => this.setExtensionHeader(factory),
 			setTitle: (title) => this.ui.terminal.setTitle(title),
 			custom: (factory, options) => this.showExtensionCustom(factory, options),
@@ -3153,6 +3195,18 @@ export class InteractiveMode {
 		this.showStatus("Startup is still in progress");
 	}
 
+	/** Backs `pi.runCommand()`. Routes through the editor submit handler so built-in slash commands behave as typed. */
+	private async runCommand(text: string): Promise<boolean> {
+		if (!text.startsWith("/")) return false;
+		const submit = this.defaultEditor.onSubmit;
+		if (!submit) return false;
+		await (submit(text) as unknown as Promise<void>);
+		if (this.activeSelectorToken !== undefined) {
+			await new Promise<void>((resolve) => this.selectorWaiters.push(resolve));
+		}
+		return true;
+	}
+
 	private setupEditorSubmitHandler(): void {
 		this.defaultEditor.onSubmit = async (text: string) => {
 			text = text.trim();
@@ -3420,6 +3474,7 @@ export class InteractiveMode {
 				} else if (event.entry.type === "compaction") {
 					const entries = this.sessionManager.buildContextEntries();
 					if (entries[0]?.id !== event.entry.id) break;
+					this.disposeToolViews();
 					this.chatContainer.clear();
 					const branch = this.sessionManager.getBranch();
 					const compactionIndex = branch.findIndex((entry) => entry.id === event.entry.id);
@@ -3483,33 +3538,7 @@ export class InteractiveMode {
 					this.streamingMessage = event.message;
 					this.streamingComponent.updateContent(this.streamingMessage, true);
 
-					for (const content of this.streamingMessage.content) {
-						if (content.type === "toolCall") {
-							if (!this.pendingTools.has(content.id)) {
-								const component = new ToolExecutionComponent(
-									content.name,
-									content.id,
-									content.arguments,
-									{
-										showImages: this.settingsManager.getShowImages(),
-										imageWidthCells: this.settingsManager.getImageWidthCells(),
-										outputPad: this.outputPad,
-									},
-									this.getRegisteredToolDefinition(content.name),
-									this.ui,
-									this.sessionManager.getCwd(),
-								);
-								component.setExpanded(this.toolOutputExpanded);
-								this.chatContainer.addChild(component);
-								this.pendingTools.set(content.id, component);
-							} else {
-								const component = this.pendingTools.get(content.id);
-								if (component) {
-									component.updateArgs(content.arguments);
-								}
-							}
-						}
-					}
+					this.appendToolCalls(this.streamingMessage.content.filter((content) => content.type === "toolCall"));
 					this.ui.requestRender();
 				}
 				break;
@@ -3561,33 +3590,40 @@ export class InteractiveMode {
 				break;
 
 			case "tool_execution_start": {
-				// Nested calls (from codemode scripts) are shown inside their parent's row.
-				if (event.parentToolCallId) break;
+				if (event.parentToolCallId) {
+					let ownerId = event.parentToolCallId;
+					let owner = this.pendingTools.get(ownerId);
+					while (!owner && ownerId.includes("/")) {
+						ownerId = ownerId.slice(0, ownerId.lastIndexOf("/"));
+						owner = this.pendingTools.get(ownerId);
+					}
+					owner?.updateNestedEvent({ ...event, parentToolCallId: event.parentToolCallId });
+					break;
+				}
+
 				let component = this.pendingTools.get(event.toolCallId);
 				if (!component) {
-					component = new ToolExecutionComponent(
-						event.toolName,
-						event.toolCallId,
-						event.args,
-						{
-							showImages: this.settingsManager.getShowImages(),
-							imageWidthCells: this.settingsManager.getImageWidthCells(),
-							outputPad: this.outputPad,
-						},
-						this.getRegisteredToolDefinition(event.toolName),
-						this.ui,
-						this.sessionManager.getCwd(),
-					);
-					component.setExpanded(this.toolOutputExpanded);
-					this.chatContainer.addChild(component);
-					this.pendingTools.set(event.toolCallId, component);
+					this.appendToolCalls([{ id: event.toolCallId, name: event.toolName, arguments: event.args }]);
+					component = this.pendingTools.get(event.toolCallId);
 				}
+				if (!component) throw new Error("Tool presentation is missing after registration");
 				component.markExecutionStarted();
 				this.ui.requestRender();
 				break;
 			}
 
 			case "tool_execution_update": {
+				if (event.parentToolCallId) {
+					let ownerId = event.parentToolCallId;
+					let owner = this.pendingTools.get(ownerId);
+					while (!owner && ownerId.includes("/")) {
+						ownerId = ownerId.slice(0, ownerId.lastIndexOf("/"));
+						owner = this.pendingTools.get(ownerId);
+					}
+					owner?.updateNestedEvent({ ...event, parentToolCallId: event.parentToolCallId });
+					break;
+				}
+
 				const component = this.pendingTools.get(event.toolCallId);
 				if (component) {
 					component.updateResult({ ...event.partialResult, isError: false }, true);
@@ -3597,6 +3633,17 @@ export class InteractiveMode {
 			}
 
 			case "tool_execution_end": {
+				if (event.parentToolCallId) {
+					let ownerId = event.parentToolCallId;
+					let owner = this.pendingTools.get(ownerId);
+					while (!owner && ownerId.includes("/")) {
+						ownerId = ownerId.slice(0, ownerId.lastIndexOf("/"));
+						owner = this.pendingTools.get(ownerId);
+					}
+					owner?.updateNestedEvent({ ...event, parentToolCallId: event.parentToolCallId });
+					break;
+				}
+
 				if (event.isError) this.maybeShowInstallChangeWarning();
 				const component = this.pendingTools.get(event.toolCallId);
 				if (component) {
@@ -3611,12 +3658,13 @@ export class InteractiveMode {
 				if (this.settingsManager.getShowTerminalProgress()) {
 					this.ui.terminal.setProgress(false);
 				}
-				this.clearStatusIndicator("working");
+				if (!this.runtimeMessage) this.clearStatusIndicator("working");
 				if (this.streamingComponent) {
 					this.chatContainer.removeChild(this.streamingComponent);
 					this.streamingComponent = undefined;
 					this.streamingMessage = undefined;
 				}
+				for (const component of this.pendingTools.values()) component.dispose();
 				this.pendingTools.clear();
 
 				this.ui.requestRender();
@@ -3666,6 +3714,7 @@ export class InteractiveMode {
 					if (entries[0]?.type !== "compaction") {
 						throw new Error("Completed compaction is missing from the session context");
 					}
+					this.disposeToolViews();
 					this.chatContainer.clear();
 					// The latest compaction is prepended for model context; append it below at its chronological position.
 					this.renderSessionEntries(entries.slice(1));
@@ -4006,24 +4055,15 @@ export class InteractiveMode {
 					messageId: meta?.id,
 					timestamp: meta?.timestamp,
 				});
+				this.appendToolCalls(
+					message.content.filter((content) => content.type === "toolCall"),
+					renderedPendingTools,
+				);
 				// Render tool call components
 				for (const content of message.content) {
 					if (content.type === "toolCall") {
-						const component = new ToolExecutionComponent(
-							content.name,
-							content.id,
-							content.arguments,
-							{
-								showImages: this.settingsManager.getShowImages(),
-								imageWidthCells: this.settingsManager.getImageWidthCells(),
-								outputPad: this.outputPad,
-							},
-							this.getRegisteredToolDefinition(content.name),
-							this.ui,
-							this.sessionManager.getCwd(),
-						);
-						component.setExpanded(this.toolOutputExpanded);
-						this.chatContainer.addChild(component);
+						const component = renderedPendingTools.get(content.id);
+						if (!component) throw new Error("Restored tool presentation is missing after registration");
 
 						if (message.stopReason === "aborted" || message.stopReason === "error") {
 							let errorMessage: string;
@@ -4037,6 +4077,7 @@ export class InteractiveMode {
 								errorMessage = message.errorMessage || "Error";
 							}
 							component.updateResult({ content: [{ type: "text", text: errorMessage }], isError: true });
+							renderedPendingTools.delete(content.id);
 						} else {
 							renderedPendingTools.set(content.id, component);
 						}
@@ -4250,6 +4291,7 @@ export class InteractiveMode {
 	}
 
 	private rebuildChatFromMessages(): void {
+		this.disposeToolViews();
 		this.chatContainer.clear();
 		this.renderSessionEntries(this.sessionManager.buildContextEntries());
 	}
@@ -4546,6 +4588,73 @@ export class InteractiveMode {
 		}
 	}
 
+	private appendToolCalls(
+		calls: readonly { id: string; name: string; arguments: unknown }[],
+		pending = this.pendingTools,
+	): void {
+		let batch: ToolExecutionBatchComponent | undefined;
+		for (const call of calls) {
+			const existing = pending.get(call.id);
+			if (existing) {
+				existing.updateArgs(call.arguments);
+				batch = this.toolBatches.get(call.id);
+				continue;
+			}
+			const renderers = this.getRegisteredToolDefinition(call.name);
+			const options: ToolExecutionOptions = {
+				showImages: this.settingsManager.getShowImages(),
+				imageWidthCells: this.settingsManager.getImageWidthCells(),
+				outputPad: this.outputPad,
+				...this.toolPresentationOptions(),
+			};
+			let component: ToolExecutionComponent;
+			if (renderers?.renderBatchExecution) {
+				if (
+					!batch ||
+					batch.getToolName() !== call.name ||
+					batch.getBatchRenderer() !== renderers.renderBatchExecution ||
+					batch.getMemberCount() >= MAX_TOOL_EXECUTION_BATCH_CALLS
+				) {
+					batch = new ToolExecutionBatchComponent(
+						call.name,
+						call.id,
+						options,
+						renderers,
+						this.ui,
+						this.sessionManager.getCwd(),
+					);
+					batch.setExpanded(this.toolOutputExpanded);
+					this.chatContainer.addChild(batch);
+				}
+				component = batch.getCall(call.id) ?? batch.addCall(call.id, call.arguments);
+				this.toolBatches.set(call.id, batch);
+			} else {
+				batch = undefined;
+				component = new ToolExecutionComponent(
+					call.name,
+					call.id,
+					call.arguments,
+					options,
+					renderers,
+					this.ui,
+					this.sessionManager.getCwd(),
+				);
+				component.setExpanded(this.toolOutputExpanded);
+				this.chatContainer.addChild(component);
+			}
+			pending.set(call.id, component);
+		}
+	}
+
+	private toolPresentationOptions(): ToolExecutionOptions {
+		return { resolveToolRenderers: (name) => this.getRegisteredToolDefinition(name) };
+	}
+
+	private disposeToolViews(): void {
+		for (const child of this.chatContainer.children) if (child instanceof ToolExecutionComponent) child.dispose();
+		this.toolBatches.clear();
+	}
+
 	private toggleToolOutputExpansion(): void {
 		this.setToolsExpanded(!this.toolOutputExpanded);
 	}
@@ -4561,7 +4670,8 @@ export class InteractiveMode {
 		for (const container of [this.loadedResourcesContainer, this.chatContainer]) {
 			for (const child of container.children) {
 				if (isExpandable(child)) {
-					child.setExpanded(expanded);
+					if (child instanceof ToolExecutionComponent) child.setExpanded(expanded, true);
+					else child.setExpanded(expanded);
 				}
 			}
 		}
@@ -4867,6 +4977,13 @@ export class InteractiveMode {
 		this.activeSelectorToken = undefined;
 		this.activeSelectorDispose = undefined;
 		dispose?.();
+		this.resolveSelectorWaiters();
+	}
+
+	private resolveSelectorWaiters(): void {
+		const waiters = this.selectorWaiters;
+		this.selectorWaiters = [];
+		for (const waiter of waiters) waiter();
 	}
 
 	/**
@@ -4886,6 +5003,7 @@ export class InteractiveMode {
 			this.editorContainer.clear();
 			this.editorContainer.addChild(this.editor);
 			this.ui.setFocus(this.editor);
+			this.resolveSelectorWaiters();
 		};
 		const created = create(done);
 		dispose = created.dispose;
@@ -5658,6 +5776,7 @@ export class InteractiveMode {
 						}
 
 						// Update UI
+						this.disposeToolViews();
 						this.chatContainer.clear();
 						this.renderInitialMessages();
 						if (result.editorText && !this.editor.getText().trim()) {
@@ -6781,7 +6900,7 @@ export class InteractiveMode {
 
 		this.chatContainer.addChild(new Spacer(1));
 		this.chatContainer.addChild(new DynamicBorder());
-		this.chatContainer.addChild(new ThemedText(() => theme.bold(theme.fg("accent", "What's New")), 1, 0));
+		this.chatContainer.addChild(new ThemedText(() => theme.bold(theme.fg("accent", "What's New in Pi")), 1, 0));
 		this.chatContainer.addChild(new Spacer(1));
 		this.chatContainer.addChild(new Markdown(changelogMarkdown, 1, 1, this.getMarkdownThemeWithSettings()));
 		this.chatContainer.addChild(new DynamicBorder());
@@ -6953,6 +7072,8 @@ export class InteractiveMode {
 			}),
 			"",
 			"=== Agent messages (JSONL) ===",
+			"=== Runtime activities (inclusive milliseconds) ===",
+			JSON.stringify(this.agent.activity.snapshot(), null, 2),
 			...this.session.messages.map((msg) => JSON.stringify(msg)),
 			"",
 		].join("\n");
@@ -7084,7 +7205,10 @@ export class InteractiveMode {
 	}
 
 	stop(fullscreenExitOutput = this.settingsManager.getFullscreenExitOutput()): void {
+		this.runtimeStatus?.dispose();
+		this.runtimeStatus = undefined;
 		this.disposeActiveSelector();
+		this.disposeToolViews();
 		if (this.settingsManager.getShowTerminalProgress()) {
 			this.ui.terminal.setProgress(false);
 		}

@@ -1,3 +1,4 @@
+import type { RuntimeActivity } from "@earendil-works/pi-agent-core";
 import { fauxAssistantMessage } from "@earendil-works/pi-ai";
 import { Container, Text } from "@earendil-works/pi-tui";
 import { describe, expect, it, vi } from "vitest";
@@ -40,6 +41,9 @@ type LoadedResourcesContext = {
 
 type RebindContext = {
 	unsubscribe?: () => void;
+	session: { agent: { activity: RuntimeActivity } };
+	sessionManager: { getCwd: () => string };
+	footerDataProvider: { setProject: (project: { cwd: string }) => void };
 	applyRuntimeSettings: () => void;
 	programStatus: { reset(): void };
 	renderCurrentSessionState: () => void;
@@ -252,6 +256,9 @@ describe("regression #5943: session_start transient UI", () => {
 
 		try {
 			const context: RebindContext = {
+				session: harness.session,
+				sessionManager: harness.session.sessionManager,
+				footerDataProvider: { setProject: () => {} },
 				applyRuntimeSettings: () => events.push("apply"),
 				programStatus: { reset: () => {} },
 				renderCurrentSessionState: () => events.push("render"),
@@ -294,6 +301,9 @@ describe("regression #5943: session_start transient UI", () => {
 
 		try {
 			const context: RebindContext = {
+				session: harness.session,
+				sessionManager: harness.session.sessionManager,
+				footerDataProvider: { setProject: () => {} },
 				applyRuntimeSettings: () => {},
 				programStatus: { reset: () => {} },
 				renderCurrentSessionState: () => events.push("render"),
@@ -347,6 +357,9 @@ describe("regression #5943: session_start transient UI", () => {
 
 		try {
 			const context: RebindContext = {
+				session: harness.session,
+				sessionManager: harness.session.sessionManager,
+				footerDataProvider: { setProject: () => {} },
 				applyRuntimeSettings: () => {},
 				programStatus: { reset: () => {} },
 				renderCurrentSessionState: () => events.push("render"),

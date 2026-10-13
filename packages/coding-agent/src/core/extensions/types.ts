@@ -61,7 +61,8 @@ import type { CacheWarmingDecisionEvent, CacheWarmingDecisionEventResult } from 
 import type { CompactionPreparation, CompactionResult } from "../compaction/index.ts";
 import type { EventBus } from "../event-bus.ts";
 import type { ExecOptions, ExecResult } from "../exec.ts";
-import type { ReadonlyFooterDataProvider } from "../footer-data-provider.ts";
+import type { ReadonlyFooter } from "../footer-content.ts";
+import type { FooterProject, ReadonlyFooterDataProvider } from "../footer-data-provider.ts";
 import type { KeybindingsManager } from "../keybindings.ts";
 import type { McpServerConfig, McpServerRegistry, RegisteredMcpServer } from "../mcp-servers.ts";
 import type { CustomMessage } from "../messages.ts";
@@ -81,6 +82,7 @@ import type { Settings } from "../settings-manager.ts";
 import type { SlashCommandInfo } from "../slash-commands.ts";
 import type { SourceInfo } from "../source-info.ts";
 import type { BuildSystemPromptOptions, NormalizedBuildSystemPromptOptions } from "../system-prompt.ts";
+import type { ToolExecutionBatchCall, ToolExecutionRenderContext, ToolExecutionSnapshot } from "../tool-execution.ts";
 import type { BashOperations } from "../tools/bash.ts";
 import type { EditToolDetails } from "../tools/edit.ts";
 import type {
@@ -105,6 +107,12 @@ export type { ExecOptions, ExecResult } from "../exec.ts";
 export type { BuildSystemPromptOptions, NormalizedBuildSystemPromptOptions } from "../system-prompt.ts";
 export type { AgentToolResult, AgentToolUpdateCallback, ToolExecutionMode };
 export type { AppKeybinding, KeybindingsManager } from "../keybindings.ts";
+export type {
+	ToolExecutionBatchCall,
+	ToolExecutionNestedCall,
+	ToolExecutionRenderContext,
+	ToolExecutionSnapshot,
+} from "../tool-execution.ts";
 
 // ============================================================================
 // UI Context
@@ -200,9 +208,16 @@ export interface ExtensionUIContext {
 	 */
 	setFooter(
 		factory:
-			| ((tui: TUI, theme: Theme, footerData: ReadonlyFooterDataProvider) => Component & { dispose?(): void })
+			| ((
+					tui: TUI,
+					theme: Theme,
+					footerData: ReadonlyFooterDataProvider,
+					defaultFooter: ReadonlyFooter,
+			  ) => Component & { dispose?(): void })
 			| undefined,
 	): void;
+
+	setFooterProject(project?: FooterProject): void;
 
 	/** Set a custom header component (shown at startup, above chat), or undefined to restore the built-in header. */
 	setHeader(factory: ((tui: TUI, theme: Theme) => Component & { dispose?(): void }) | undefined): void;
@@ -665,11 +680,42 @@ export interface ToolDefinition<TParams extends TSchema = TSchema, TDetails = un
 		theme: Theme,
 		context: ToolRenderContext<TState, Static<TParams>>,
 	) => Component;
+
+	/** Full execution rendering, owning framing, images and input. Reuse context.lastComponent; dispose is called on replacement/removal. */
+	renderExecution?: (
+		snapshot: ToolExecutionSnapshot<Static<TParams>, TDetails>,
+		theme: Theme,
+		context: ToolExecutionRenderContext<TState>,
+	) => Component;
+	renderBatchExecution?: (
+		calls: readonly ToolExecutionBatchCall[],
+		theme: Theme,
+		context: ToolExecutionRenderContext<TState>,
+	) => Component;
+	renderExecutionHtml?: (
+		snapshot: ToolExecutionSnapshot<Static<TParams>, TDetails>,
+		theme: Theme,
+		context: ToolExecutionRenderContext<TState>,
+	) => string;
 }
 
 type AnyToolDefinition = ToolDefinition<any, any, any>;
 
-export type ToolRenderers = Pick<AnyToolDefinition, "renderShell" | "renderCall" | "renderResult">;
+export type ToolRenderers = Pick<
+	AnyToolDefinition,
+	"renderShell" | "renderCall" | "renderResult" | "renderBatchExecution"
+> & {
+	renderExecution?: (
+		snapshot: ToolExecutionSnapshot<any, any>,
+		theme: Theme,
+		context: ToolExecutionRenderContext<any>,
+	) => Component;
+	renderExecutionHtml?: (
+		snapshot: ToolExecutionSnapshot<any, any>,
+		theme: Theme,
+		context: ToolExecutionRenderContext<any>,
+	) => string;
+};
 
 /**
  * Chooses how calls to a tool are drawn, including tools that are not registered. `next()` returns
@@ -1784,6 +1830,13 @@ export interface ExtensionAPI {
 	/** Get available slash commands in the current session. */
 	getCommands(): SlashCommandInfo[];
 
+	/**
+	 * Run a built-in or extension slash command as if the user typed it, including the
+	 * interactive UI it opens. Returns false when the runtime has no command dispatcher
+	 * (rpc, json, print, SDK) or when the text is not a slash command. Interactive mode only.
+	 */
+	runCommand(text: string): Promise<boolean>;
+
 	// =========================================================================
 	// Model and Thinking Level
 	// =========================================================================
@@ -1802,6 +1855,12 @@ export interface ExtensionAPI {
 	 * for new sessions.
 	 */
 	setThinkingLevel(level: ThinkingLevel): void;
+
+	/** Persist the default model for new sessions. */
+	setDefaultModel(provider: string, modelId: string): void;
+
+	/** Persist the default thinking level for new sessions. */
+	setDefaultThinkingLevel(level: ThinkingLevel): void;
 
 	// =========================================================================
 	// Provider Registration
@@ -2139,6 +2198,8 @@ export type GetSettingsHandler = () => Settings;
 
 export type GetCommandsHandler = () => SlashCommandInfo[];
 
+export type RunCommandHandler = (text: string) => Promise<boolean>;
+
 export type SetActiveToolsHandler = (toolNames: string[]) => void;
 
 export type RefreshToolsHandler = () => void;
@@ -2148,6 +2209,10 @@ export type SetModelHandler = (model: Model<any>) => Promise<boolean>;
 export type GetThinkingLevelHandler = () => ThinkingLevel;
 
 export type SetThinkingLevelHandler = (level: ThinkingLevel) => void;
+
+export type SetDefaultModelHandler = (provider: string, modelId: string) => void;
+
+export type SetDefaultThinkingLevelHandler = (level: ThinkingLevel) => void;
 
 export type SetLabelHandler = (entryId: string, label: string | undefined) => void;
 
@@ -2203,9 +2268,12 @@ export interface ExtensionActions {
 	setActiveTools: SetActiveToolsHandler;
 	refreshTools: RefreshToolsHandler;
 	getCommands: GetCommandsHandler;
+	runCommand: RunCommandHandler;
 	setModel: SetModelHandler;
 	getThinkingLevel: GetThinkingLevelHandler;
 	setThinkingLevel: SetThinkingLevelHandler;
+	setDefaultModel: SetDefaultModelHandler;
+	setDefaultThinkingLevel: SetDefaultThinkingLevelHandler;
 }
 
 /**
@@ -2242,6 +2310,8 @@ export interface ExtensionContextActions {
  */
 export interface ExtensionCommandContextActions {
 	waitForIdle: () => Promise<void>;
+	/** Backs `pi.runCommand()`. Interactive mode only; absent elsewhere. */
+	runCommand?: RunCommandHandler;
 	newSession: (options?: {
 		parentSession?: string;
 		setup?: (sessionManager: SessionManager) => Promise<void>;
