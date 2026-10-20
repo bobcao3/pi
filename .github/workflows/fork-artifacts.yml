@@ -2,7 +2,7 @@ name: Fork artifacts
 
 on:
   push:
-    branches: ["cpi-fork"]
+    branches: ["main", "cpi-fork"]
     tags: ["cpi-*"]
   pull_request:
   workflow_dispatch:
