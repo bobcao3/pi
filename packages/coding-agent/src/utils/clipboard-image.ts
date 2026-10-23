@@ -1,12 +1,11 @@
 import { getNativeClipboard } from "@earendil-works/pi-tui";
-import { randomUUID } from "crypto";
-import { readFileSync, unlinkSync } from "fs";
-import { tmpdir } from "os";
+import { readFileSync, rmSync } from "fs";
 import { join } from "path";
 
 import { runClipboardCommand } from "./clipboard-command.ts";
 import { detectSupportedImageMimeType } from "./mime.ts";
 import { loadPhoton } from "./photon.ts";
+import { createTempDirectory } from "./temp-paths.ts";
 import { isWSL } from "./wsl.ts";
 
 export type ClipboardImage = {
@@ -116,9 +115,10 @@ async function readClipboardImageViaWlPaste(): Promise<ClipboardImage | null | u
  * directly, so we use it as a fallback.
  */
 async function readClipboardImageViaPowerShell(): Promise<ClipboardImage | null> {
-	const tmpFile = join(tmpdir(), `pi-wsl-clip-${randomUUID()}.png`);
-
+	let directory: string | undefined;
 	try {
+		directory = createTempDirectory("pi-wsl-clip-");
+		const tmpFile = join(directory, "clipboard.png");
 		const winPathResult = await runClipboardCommand("wslpath", ["-w", tmpFile], {
 			timeoutMs: DEFAULT_LIST_TIMEOUT_MS,
 		});
@@ -162,7 +162,7 @@ async function readClipboardImageViaPowerShell(): Promise<ClipboardImage | null>
 		return null;
 	} finally {
 		try {
-			unlinkSync(tmpFile);
+			if (directory) rmSync(directory, { recursive: true, force: true });
 		} catch {
 			// Ignore cleanup errors.
 		}

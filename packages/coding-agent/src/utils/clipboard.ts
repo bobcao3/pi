@@ -1,9 +1,9 @@
-import { randomUUID } from "node:crypto";
-import { unlinkSync, writeFileSync } from "node:fs";
-import { platform, tmpdir } from "node:os";
+import { rmSync, writeFileSync } from "node:fs";
+import { platform } from "node:os";
 import { join } from "node:path";
 import { getNativeClipboard } from "@earendil-works/pi-tui";
 import { runClipboardCommand } from "./clipboard-command.ts";
+import { createTempDirectory } from "./temp-paths.ts";
 import { isWSL } from "./wsl.ts";
 
 const MAX_OSC52_ENCODED_LENGTH = 100_000;
@@ -32,9 +32,11 @@ function emitOsc52(text: string): boolean {
  * decode piped bytes with the console code page, which mangles non-ASCII UTF-8.
  */
 async function copyViaWindowsClipboard(text: string): Promise<boolean> {
-	const tmpFile = join(tmpdir(), `pi-wsl-clip-${randomUUID()}.txt`);
+	let directory: string | undefined;
 	try {
-		writeFileSync(tmpFile, text, { encoding: "utf8", mode: 0o600 });
+		directory = createTempDirectory("pi-wsl-clip-");
+		const tmpFile = join(directory, "clipboard.txt");
+		writeFileSync(tmpFile, text, { encoding: "utf8", mode: 0o600, flag: "wx" });
 		const winPath = (await runClipboardCommand("wslpath", ["-w", tmpFile], { timeoutMs: 1000 }))
 			?.toString("utf8")
 			.trim();
@@ -48,7 +50,7 @@ async function copyViaWindowsClipboard(text: string): Promise<boolean> {
 		return false;
 	} finally {
 		try {
-			unlinkSync(tmpFile);
+			if (directory) rmSync(directory, { recursive: true, force: true });
 		} catch {
 			// The file may not have been created.
 		}

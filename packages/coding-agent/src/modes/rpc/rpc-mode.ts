@@ -84,8 +84,12 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 
 	// Shutdown request flag
 	let shutdownRequested = false;
-	let shuttingDown = false;
+	let shutdownPromise: Promise<never> | undefined;
+	let shutdownSignal: NodeJS.Signals | undefined;
 	const signalCleanupHandlers: Array<() => void> = [];
+	const reportShutdownError = (error: unknown) => {
+		console.error(error instanceof Error ? error.message : String(error));
+	};
 
 	/** Helper for dialog methods with signal/timeout support */
 	function createDialogPromise<T>(
@@ -357,7 +361,7 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 		unsubscribe = session.subscribe((event) => {
 			output(toJsonEvent(event));
 			if (event.type === "agent_settled") {
-				void checkShutdownRequested();
+				void checkShutdownRequested().catch(reportShutdownError);
 			}
 		});
 		unsubscribeBackpressure = session.agent.subscribe(async () => {
@@ -373,8 +377,7 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 
 		for (const signal of signals) {
 			const handler = () => {
-				killTrackedDetachedChildren();
-				void shutdown(signal === "SIGHUP" ? 129 : 143, signal);
+				void shutdown(signal === "SIGHUP" ? 129 : 143, signal).catch(reportShutdownError);
 			};
 			process.on(signal, handler);
 			signalCleanupHandlers.push(() => process.off(signal, handler));
@@ -387,6 +390,9 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 	// Handle a single command
 	const handleCommand = async (command: RpcCommand): Promise<RpcResponse | undefined> => {
 		const id = command.id;
+		if (shutdownPromise && command.type !== "abort") {
+			return error(id, command.type, "Session shutdown is in progress");
+		}
 
 		switch (command.type) {
 			// =================================================================
@@ -725,23 +731,26 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 	 */
 	let detachInput = () => {};
 
-	async function shutdown(exitCode = 0, signal?: NodeJS.Signals): Promise<never> {
-		if (shuttingDown) {
+	function shutdown(exitCode = 0, signal?: NodeJS.Signals): Promise<never> {
+		shutdownSignal ??= signal;
+		if (shutdownPromise) return shutdownPromise;
+		shutdownPromise = (async () => {
+			await runtimeHost.dispose();
+			unsubscribe?.();
+			unsubscribeBackpressure?.();
+			detachInput();
+			process.stdin.pause();
+			if (shutdownSignal !== "SIGTERM") await flushRawStdout();
+			if (shutdownSignal) killTrackedDetachedChildren();
+			for (const cleanup of signalCleanupHandlers) cleanup();
 			process.exit(exitCode);
-		}
-		shuttingDown = true;
-		for (const cleanup of signalCleanupHandlers) {
-			cleanup();
-		}
-		unsubscribe?.();
-		unsubscribeBackpressure?.();
-		await runtimeHost.dispose();
-		detachInput();
-		process.stdin.pause();
-		if (signal !== "SIGTERM") {
-			await flushRawStdout();
-		}
-		process.exit(exitCode);
+		})().catch((error: unknown) => {
+			shutdownPromise = undefined;
+			shutdownSignal = undefined;
+			process.exitCode = 1;
+			throw error;
+		});
+		return shutdownPromise;
 	}
 
 	async function checkShutdownRequested(): Promise<void> {
@@ -802,7 +811,7 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 	};
 
 	const onInputEnd = () => {
-		void shutdown();
+		void shutdown().catch(reportShutdownError);
 	};
 	process.stdin.on("end", onInputEnd);
 

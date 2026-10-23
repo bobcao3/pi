@@ -99,6 +99,7 @@ import {
 	type SessionBeforeTreeResult,
 	type SessionBoundaryDraft,
 	type SessionCompactFailedEvent,
+	type SessionShutdownEvent,
 	type SessionStartEvent,
 	type ShutdownHandler,
 	type ToolDefinition,
@@ -120,6 +121,7 @@ import type { ModelRuntime } from "./model-runtime.ts";
 import { NestedToolCallRunner } from "./nested-tool-calls.ts";
 import { expandPromptTemplate, type PromptTemplate } from "./prompt-templates.ts";
 import type { ResourceExtensionPaths, ResourceLoader } from "./resource-loader.ts";
+import { SESSION_CLEANUP_TIMEOUT_MS } from "./session-cleanup.ts";
 import { exportSessionToJsonl } from "./session-export.ts";
 import {
 	type BranchSummaryEntry,
@@ -387,6 +389,11 @@ export class AgentSession {
 	private _unsubscribeAgent?: () => void;
 	private _eventListeners: AgentSessionEventListener[] = [];
 	private _isAgentRunActive = false;
+	private _closed = false;
+	private _admissionClosed = false;
+	private _cleanupInProgress = false;
+	private _closePromise: Promise<void> | undefined;
+	private _reloadPromise: Promise<void> | undefined;
 	private _agentRunAbortRequested = false;
 	private _idleWaitPromise: Promise<void> | undefined;
 	private _resolveIdleWait: (() => void) | undefined;
@@ -1406,11 +1413,92 @@ export class AgentSession {
 		}
 	}
 
+	close(options?: {
+		reason?: SessionShutdownEvent["reason"];
+		targetSessionFile?: string;
+		beforeInvalidate?: () => void;
+		timeoutMs?: number;
+	}): Promise<void> {
+		if (this._closePromise) return this._closePromise;
+		if (this._closed) {
+			return Promise.reject(new Error("Session was disposed without orderly cleanup"));
+		}
+		this._closePromise = (async () => {
+			const timeoutMs = options?.timeoutMs ?? SESSION_CLEANUP_TIMEOUT_MS;
+			if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) throw new Error("Invalid session cleanup timeout");
+			const deadline = performance.now() + timeoutMs;
+			if (this._reloadPromise) {
+				let timer: ReturnType<typeof setTimeout> | undefined;
+				try {
+					await Promise.race([
+						this._reloadPromise.catch(() => {}),
+						new Promise<never>((_resolve, reject) => {
+							timer = setTimeout(
+								() => reject(new Error("Session close timed out waiting for reload")),
+								timeoutMs,
+							);
+						}),
+					]);
+				} finally {
+					if (timer !== undefined) clearTimeout(timer);
+				}
+			}
+			if (this._closed) throw new Error("Session was disposed without orderly cleanup");
+			const remainingMs = deadline - performance.now();
+			if (remainingMs <= 0) throw new Error("Session close timed out");
+			await this._cleanupSession(options?.reason ?? "quit", options?.targetSessionFile, remainingMs);
+			options?.beforeInvalidate?.();
+			this.dispose();
+		})().catch((error: unknown) => {
+			this._closePromise = undefined;
+			throw error;
+		});
+		return this._closePromise;
+	}
+
+	private async _cleanupSession(
+		reason: SessionShutdownEvent["reason"],
+		targetSessionFile?: string,
+		timeoutMs = SESSION_CLEANUP_TIMEOUT_MS,
+	): Promise<void> {
+		if (this._closed) throw new Error("Session is closed");
+		if (this._cleanupInProgress) throw new Error("Session cleanup is already in progress");
+		this._cleanupInProgress = true;
+		try {
+			const notify = () =>
+				emitSessionShutdownEvent(this._extensionRunner, {
+					type: "session_shutdown",
+					reason,
+					targetSessionFile,
+				});
+			const drain = () => {
+				this._admissionClosed = true;
+				return this.abort();
+			};
+			await this._extensionRunner.cleanupSession(
+				reason,
+				reason === "quit" || reason === "reload" ? [notify, drain] : [drain, notify],
+				timeoutMs,
+			);
+			if (this._closed) throw new Error("Session was disposed during cleanup");
+		} catch (error) {
+			this._admissionClosed = false;
+			throw error;
+		} finally {
+			this._cleanupInProgress = false;
+		}
+	}
+
+	private _assertAdmissionOpen(): void {
+		if (this._closed || this._admissionClosed) throw new Error("Session is closed to new work");
+	}
+
 	/**
 	 * Remove all listeners and disconnect from agent.
 	 * Call this when completely done with the session.
 	 */
 	dispose(): void {
+		this._closed = true;
 		try {
 			this.abortRetry();
 			this.abortCompaction();
@@ -1872,6 +1960,7 @@ export class AgentSession {
 	 * @param onStarted Called once the run's messages are prepared, before the first request.
 	 */
 	private async _startRun(trigger: BeforeAgentStartTrigger, onStarted?: () => void): Promise<void> {
+		this._assertAdmissionOpen();
 		this._isAgentRunActive = true;
 		this._agentRunAbortRequested = false;
 		let messages: AgentMessage[];
@@ -2091,6 +2180,7 @@ export class AgentSession {
 	 * @throws Error if no model selected or no API key available (when not streaming)
 	 */
 	async prompt(text: string, options?: PromptOptions): Promise<void> {
+		this._assertAdmissionOpen();
 		if (this._isEmittingAgentSettled) {
 			this._deferredSettledActions.push(async () => await this.prompt(text, options));
 			return;
@@ -2121,6 +2211,7 @@ export class AgentSession {
 			options?.source ?? "interactive",
 			this.isStreaming ? options?.streamingBehavior : undefined,
 		);
+		this._assertAdmissionOpen();
 		if (!processedInput) {
 			preflightResult?.("handled");
 			return;
@@ -2241,6 +2332,7 @@ export class AgentSession {
 		behavior: "steer" | "followUp",
 		source: InputSource,
 	): Promise<QueuedInputDisposition> {
+		this._assertAdmissionOpen();
 		if (text.startsWith("/")) {
 			this._throwIfExtensionCommand(text);
 		}
@@ -2301,6 +2393,7 @@ export class AgentSession {
 	 * Internal: Queue a steering message (already expanded, no extension command check).
 	 */
 	private async _queueSteer(text: string, images?: ImageContent[]): Promise<void> {
+		this._assertAdmissionOpen();
 		this._steeringMessages.push(text);
 		this._emitQueueUpdate();
 		const content: (TextContent | ImageContent)[] = [{ type: "text", text }];
@@ -2318,6 +2411,7 @@ export class AgentSession {
 	 * Internal: Queue a follow-up message (already expanded, no extension command check).
 	 */
 	private async _queueFollowUp(text: string, images?: ImageContent[]): Promise<void> {
+		this._assertAdmissionOpen();
 		this._followUpMessages.push(text);
 		this._emitQueueUpdate();
 		const content: (TextContent | ImageContent)[] = [{ type: "text", text }];
@@ -2359,6 +2453,7 @@ export class AgentSession {
 		message: Pick<CustomMessage<T>, "customType" | "content" | "display" | "details">,
 		options?: { triggerTurn?: boolean; deliverAs?: "steer" | "followUp" | "nextTurn" },
 	): Promise<void> {
+		this._assertAdmissionOpen();
 		const appMessage = {
 			role: "custom" as const,
 			customType: message.customType,
@@ -2827,7 +2922,9 @@ export class AgentSession {
 	 * @param customInstructions Optional instructions for the compaction summary
 	 */
 	async compact(customInstructions?: string): Promise<CompactionResult> {
+		this._assertAdmissionOpen();
 		await this.abort();
+		this._assertAdmissionOpen();
 		this._compactionAbortController = new AbortController();
 		this._emit({ type: "compaction_start", reason: "manual" });
 		let fromExtension = false;
@@ -3317,6 +3414,7 @@ export class AgentSession {
 	}
 
 	async bindExtensions(bindings: ExtensionBindings): Promise<void> {
+		this._assertAdmissionOpen();
 		if (bindings.uiContext !== undefined) {
 			this._extensionUIContext = bindings.uiContext;
 		}
@@ -3726,10 +3824,22 @@ export class AgentSession {
 		});
 	}
 
-	async reload(options?: { beforeSessionStart?: () => void | Promise<void> }): Promise<void> {
+	reload(options?: { beforeSessionStart?: () => void | Promise<void>; timeoutMs?: number }): Promise<void> {
+		if (this._closed || this._closePromise) return Promise.reject(new Error("Session is closed or closing"));
+		if (this._reloadPromise) return this._reloadPromise;
+		this._reloadPromise = this._reload(options).finally(() => {
+			this._reloadPromise = undefined;
+		});
+		return this._reloadPromise;
+	}
+
+	private async _reload(options?: {
+		beforeSessionStart?: () => void | Promise<void>;
+		timeoutMs?: number;
+	}): Promise<void> {
 		const oldRunner = this._extensionRunner;
 		const previousFlagValues = oldRunner.getFlagValues();
-		await emitSessionShutdownEvent(oldRunner, { type: "session_shutdown", reason: "reload" });
+		await this._cleanupSession("reload", undefined, options?.timeoutMs);
 		oldRunner.invalidate();
 		const getDefaultTools = () =>
 			this._usesDefaultTools
@@ -3743,6 +3853,10 @@ export class AgentSession {
 		this.syncQueueModesFromSettings();
 		resetApiProviders();
 		await this._resourceLoader.reload();
+		if (this._closed) {
+			this._resourceLoader.getExtensions().runtime.invalidate("Session is closed");
+			throw new Error("Session was disposed during reload");
+		}
 		// Activate tools newly added to defaultTools. Removed ones stay active, and tools disabled
 		// during the session stay disabled unless the setting newly adds them.
 		const addedDefaultTools = getDefaultTools().filter((name) => !previousDefaultTools.has(name));
@@ -3754,6 +3868,7 @@ export class AgentSession {
 			includeAllExtensionTools: true,
 		});
 
+		this._admissionClosed = false;
 		const hasBindings =
 			this._extensionUIContext ||
 			this._extensionCommandContextActions ||
@@ -3912,6 +4027,7 @@ export class AgentSession {
 		onChunk?: (chunk: string) => void,
 		options?: { excludeFromContext?: boolean; id?: string; operations?: BashOperations },
 	): Promise<BashResult> {
+		this._assertAdmissionOpen();
 		const abortController = new AbortController();
 		this._bashAbortControllers.add(abortController);
 
@@ -4034,6 +4150,7 @@ export class AgentSession {
 		targetId: string,
 		options: { summarize?: boolean; customInstructions?: string; replaceInstructions?: boolean; label?: string } = {},
 	): Promise<{ editorText?: string; cancelled: boolean; aborted?: boolean; summaryEntry?: BranchSummaryEntry }> {
+		this._assertAdmissionOpen();
 		if (this.isStreaming) {
 			throw new Error("Wait for the current response to finish before navigating the session tree.");
 		}
@@ -4389,6 +4506,7 @@ export class AgentSession {
 	 * Used when the user declines to share the transcript itself.
 	 */
 	async summarizeForBugReport(options: { hint?: string; signal: AbortSignal }): Promise<string> {
+		this._assertAdmissionOpen();
 		const model = this.model;
 		if (!model) {
 			throw new Error("No model selected");

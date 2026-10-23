@@ -158,6 +158,10 @@ export type {
 	SessionBeforeTreeEvent,
 	SessionBeforeTreeResult,
 	SessionBoundaryDraft,
+	SessionCleanupContext,
+	SessionCleanupEvent,
+	SessionCleanupHook,
+	SessionCleanupResult,
 	SessionCompactEvent,
 	SessionCompactFailedEvent,
 	SessionInfoChangedEvent,
@@ -284,6 +288,7 @@ export {
 	createWriteTool,
 	type PromptTemplate,
 } from "./core/sdk.ts";
+export { type DeleteSessionOptions, deleteSessionFile } from "./core/session-delete.ts";
 export {
 	type BranchSummaryEntry,
 	buildContextEntries,

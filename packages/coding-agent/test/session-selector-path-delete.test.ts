@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setKeybindings } from "@earendil-works/pi-tui";
@@ -105,6 +105,36 @@ describe("session selector path/delete interactions", () => {
 		// session selector uses the global theme instance
 		initTheme("dark");
 	});
+	it("keeps a session selectable when its injected deletion guard denies cleanup, then deletes on retry", async () => {
+		const directory = mkdtempSync(join(tmpdir(), "pi-selector-delete-"));
+		tempDirs.push(directory);
+		const path = join(directory, "owned.jsonl");
+		const contents = `${JSON.stringify({ type: "session", version: 3, id: "owned", cwd: directory })}\n`;
+		writeFileSync(path, contents);
+		let pending = true;
+		const selector = new SessionSelectorComponent(
+			async () => (existsSync(path) ? [makeSession({ id: "owned", path })] : []),
+			async () => [],
+			() => {},
+			() => {},
+			() => {},
+			() => {},
+			{
+				keybindings,
+				sessionDeleteOptions: { guard: () => ({ pending: pending ? ["owned-artifact"] : [] }) },
+			},
+		);
+		await flushPromises();
+		const list = selector.getSessionList();
+		await list.onDeleteSession!(path);
+		expect(readFileSync(path, "utf8")).toBe(contents);
+		expect(list.getSelectedSessionPath()).toBe(path);
+		pending = false;
+		await list.onDeleteSession!(path);
+		expect(existsSync(path)).toBe(false);
+		expect(list.getSelectedSessionPath()).toBeUndefined();
+	});
+
 	it("does not treat Ctrl+Backspace as delete when search query is non-empty", async () => {
 		const sessions = [makeSession({ id: "a" }), makeSession({ id: "b" })];
 

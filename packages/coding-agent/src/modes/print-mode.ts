@@ -36,18 +36,22 @@ export async function runPrintMode(runtimeHost: AgentSessionRuntime, options: Pr
 	let session = runtimeHost.session;
 	let unsubscribe: (() => void) | undefined;
 	let unsubscribeBackpressure: (() => void) | undefined;
-	let disposed = false;
+	let disposePromise: Promise<void> | undefined;
+	let finalDisposePromise: Promise<void> | undefined;
+	let signalShutdownPromise: Promise<void> | undefined;
 	const signalCleanupHandlers: Array<() => void> = [];
 
-	const disposeRuntime = async (): Promise<void> => {
-		if (disposed) return;
-		disposed = true;
-		try {
+	const disposeRuntime = (): Promise<void> => {
+		if (disposePromise) return disposePromise;
+		disposePromise = (async () => {
 			await runtimeHost.dispose();
-		} finally {
 			unsubscribe?.();
 			unsubscribeBackpressure?.();
-		}
+		})().catch((error: unknown) => {
+			disposePromise = undefined;
+			throw error;
+		});
+		return disposePromise;
 	};
 
 	const registerSignalHandlers = (): void => {
@@ -58,10 +62,18 @@ export async function runPrintMode(runtimeHost: AgentSessionRuntime, options: Pr
 
 		for (const signal of signals) {
 			const handler = () => {
-				killTrackedDetachedChildren();
-				void disposeRuntime().finally(() => {
-					process.exit(signal === "SIGHUP" ? 129 : 143);
-				});
+				if (!signalShutdownPromise) {
+					signalShutdownPromise = (async () => {
+						await disposeRuntime();
+						killTrackedDetachedChildren();
+						process.exit(signal === "SIGHUP" ? 129 : 143);
+					})().catch((error: unknown) => {
+						signalShutdownPromise = undefined;
+						exitCode = 1;
+						process.exitCode = 1;
+						console.error(error instanceof Error ? error.message : String(error));
+					});
+				}
 			};
 			process.on(signal, handler);
 			signalCleanupHandlers.push(() => process.off(signal, handler));
@@ -139,7 +151,8 @@ export async function runPrintMode(runtimeHost: AgentSessionRuntime, options: Pr
 			await session.prompt(message);
 		}
 
-		await disposeRuntime();
+		finalDisposePromise = disposeRuntime();
+		await finalDisposePromise;
 
 		if (mode === "text") {
 			const state = session.state;
@@ -163,16 +176,20 @@ export async function runPrintMode(runtimeHost: AgentSessionRuntime, options: Pr
 				}
 			}
 		}
-
-		return exitCode;
 	} catch (error: unknown) {
 		console.error(error instanceof Error ? error.message : String(error));
-		return 1;
+		exitCode = 1;
 	} finally {
+		try {
+			await (disposePromise ?? finalDisposePromise ?? disposeRuntime());
+		} catch (error: unknown) {
+			console.error(error instanceof Error ? error.message : String(error));
+			exitCode = 1;
+		}
 		for (const cleanup of signalCleanupHandlers) {
 			cleanup();
 		}
-		await disposeRuntime();
 		await flushRawStdout();
 	}
+	return exitCode;
 }

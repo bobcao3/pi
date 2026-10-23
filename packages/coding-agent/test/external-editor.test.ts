@@ -4,6 +4,7 @@ import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { type ExternalEditorResult, editInExternalEditor } from "../src/modes/interactive/external-editor.ts";
+import { getTempDir } from "../src/utils/temp-paths.ts";
 
 const editorFixturePath = fileURLToPath(new URL("./fixtures/fake-external-editor.mjs", import.meta.url));
 
@@ -38,7 +39,7 @@ describe("editInExternalEditor", () => {
 		const directory = dirname(capture.filePath);
 
 		expect(result).toEqual({ status: "complete", content: "edited" });
-		expect(dirname(directory)).toBe(tmpdir());
+		expect(dirname(directory)).toBe(getTempDir());
 		expect(basename(directory)).toMatch(/^pi-editor-.+$/);
 		expect(basename(capture.filePath)).toBe("prompt.md");
 		expect(capture.entries).toEqual(["prompt.md"]);

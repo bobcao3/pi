@@ -56,6 +56,7 @@ import {
 	MissingSessionCwdError,
 	type SessionCwdIssue,
 } from "./core/session-cwd.ts";
+import type { DeleteSessionOptions } from "./core/session-delete.ts";
 import { assertValidSessionId, SessionManager } from "./core/session-manager.ts";
 import { collectSettingsDiagnostics, deduplicateDiagnostics } from "./core/settings-diagnostics.ts";
 import { SettingsManager } from "./core/settings-manager.ts";
@@ -361,6 +362,7 @@ export async function createSessionManager(
 	cwd: string,
 	sessionDir: string | undefined,
 	settingsManager: SettingsManager,
+	sessionDeleteOptions?: DeleteSessionOptions,
 ): Promise<SessionManager> {
 	if (parsed.noSession || parsed.help || parsed.listModels !== undefined) {
 		return SessionManager.inMemory(cwd, parsed.sessionId !== undefined ? { id: parsed.sessionId } : undefined);
@@ -419,6 +421,7 @@ export async function createSessionManager(
 				(onProgress, signal) => SessionManager.list(cwd, sessionDir, onProgress, signal),
 				(onProgress, signal) => SessionManager.listAll(sessionDir, onProgress, signal),
 				settingsManager,
+				sessionDeleteOptions,
 			);
 			if (!selectedPath) {
 				console.log(chalk.dim("No session selected"));
@@ -569,6 +572,7 @@ async function promptForMissingSessionCwd(
 }
 
 export interface MainOptions {
+	sessionDeleteOptions?: DeleteSessionOptions;
 	extensionFactories?: InlineExtension[];
 	defaultExtensionPaths?: string[];
 	defaultSkillPaths?: string[];
@@ -697,7 +701,13 @@ export async function main(args: string[], options?: MainOptions) {
 		(parsed.sessionDir ? normalizePath(parsed.sessionDir) : undefined) ??
 		(envSessionDir ? expandTildePath(envSessionDir) : undefined) ??
 		startupSettingsManager.getSessionDir();
-	let sessionManager = await createSessionManager(parsed, cwd, sessionDir, startupSettingsManager);
+	let sessionManager = await createSessionManager(
+		parsed,
+		cwd,
+		sessionDir,
+		startupSettingsManager,
+		options?.sessionDeleteOptions,
+	);
 	const missingSessionCwdIssue = getMissingSessionCwdIssue(sessionManager, cwd);
 	if (missingSessionCwdIssue) {
 		if (appMode === "interactive") {
@@ -963,6 +973,7 @@ export async function main(args: string[], options?: MainOptions) {
 	} else if (appMode === "interactive") {
 		const interactiveMode = new InteractiveMode(runtime, {
 			createVcsSource: options?.createVcsSource,
+			sessionDeleteOptions: options?.sessionDeleteOptions,
 			migratedProviders,
 			startupDiagnostics,
 			modelFallbackMessage,

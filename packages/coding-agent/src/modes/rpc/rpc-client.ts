@@ -10,6 +10,7 @@ import type { ImageContent } from "@earendil-works/pi-ai";
 import type { PromptDisposition, QueuedInputDisposition, SessionStats } from "../../core/agent-session.ts";
 import type { BashResult } from "../../core/bash-executor.ts";
 import type { CompactionResult } from "../../core/compaction/index.ts";
+import { SESSION_CLEANUP_TIMEOUT_MS } from "../../core/session-cleanup.ts";
 import type { SessionEntry, SessionTreeNode } from "../../core/session-manager.ts";
 import type { JsonAgentSessionEvent } from "../json-event.ts";
 import { attachJsonlLineReader, serializeJsonLine } from "./jsonl.ts";
@@ -62,6 +63,7 @@ export class RpcClient {
 	private requestId = 0;
 	private stderr = "";
 	private exitError: Error | null = null;
+	private stopPromise: Promise<void> | null = null;
 	private options: RpcClientOptions;
 
 	constructor(options: RpcClientOptions = {}) {
@@ -77,6 +79,8 @@ export class RpcClient {
 		}
 
 		this.exitError = null;
+		this.stopPromise = null;
+		this.stderr = "";
 
 		const cliPath = this.options.cliPath ?? "dist/cli.js";
 		const args = ["--mode", "rpc"];
@@ -142,28 +146,44 @@ export class RpcClient {
 	/**
 	 * Stop the RPC agent process.
 	 */
-	async stop(): Promise<void> {
-		if (!this.process) return;
+	stop(forceAfterMs = SESSION_CLEANUP_TIMEOUT_MS + 1000): Promise<void> {
+		if (this.stopPromise) return this.stopPromise;
+		const childProcess = this.process;
+		if (!childProcess) return Promise.resolve();
+		if (!Number.isFinite(forceAfterMs) || forceAfterMs <= 0 || forceAfterMs > 2_147_483_647) {
+			return Promise.reject(new Error("Invalid RPC stop force deadline"));
+		}
 
-		this.stopReadingStdout?.();
-		this.stopReadingStdout = null;
-		this.process.kill("SIGTERM");
-
-		// Wait for process to exit
-		await new Promise<void>((resolve) => {
-			const timeout = setTimeout(() => {
-				this.process?.kill("SIGKILL");
-				resolve();
-			}, 1000);
-
-			this.process?.on("exit", () => {
+		this.stopPromise = new Promise<void>((resolve, reject) => {
+			let forced = false;
+			let timeout: ReturnType<typeof setTimeout> | undefined;
+			const onClose = (code: number | null, signal: NodeJS.Signals | null) => {
 				clearTimeout(timeout);
-				resolve();
-			});
+				if (forced) {
+					reject(new Error(`Agent process forced to stop after ${forceAfterMs}ms. Stderr: ${this.stderr}`));
+				} else if (code !== 0 || signal !== null) {
+					reject(this.exitError ?? this.createProcessExitError(code, signal));
+				} else {
+					resolve();
+				}
+			};
+			if (childProcess.exitCode !== null || childProcess.signalCode !== null) {
+				onClose(childProcess.exitCode, childProcess.signalCode);
+				return;
+			}
+			childProcess.once("close", onClose);
+			timeout = setTimeout(() => {
+				forced = true;
+				childProcess.kill("SIGKILL");
+			}, forceAfterMs);
+			childProcess.stdin?.end();
+		}).finally(() => {
+			this.stopReadingStdout?.();
+			this.stopReadingStdout = null;
+			this.process = null;
+			this.rejectPendingRequests(this.exitError ?? new Error("Client stopped"));
 		});
-
-		this.process = null;
-		this.pendingRequests.clear();
+		return this.stopPromise;
 	}
 
 	/**
@@ -559,6 +579,7 @@ export class RpcClient {
 		if (!childProcess || !stdin) {
 			throw new Error("Client not started");
 		}
+		if (this.stopPromise) throw new Error("Client stopping");
 		if (this.exitError) {
 			throw this.exitError;
 		}

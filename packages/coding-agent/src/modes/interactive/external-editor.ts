@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { createTempDirectory } from "../../utils/temp-paths.ts";
 import { stripBom } from "../../utils/text.ts";
 
 export interface ExternalEditorOptions {
@@ -12,7 +12,7 @@ export interface ExternalEditorOptions {
 export type ExternalEditorResult = { status: "complete"; content: string } | { status: "failed" };
 
 export async function editInExternalEditor(options: ExternalEditorOptions): Promise<ExternalEditorResult> {
-	const directory = mkdtempSync(join(tmpdir(), "pi-editor-"));
+	const directory = createTempDirectory("pi-editor-");
 	const filePath = join(directory, "prompt.md");
 	try {
 		writeFileSync(filePath, options.content, "utf-8");
@@ -27,8 +27,11 @@ export async function editInExternalEditor(options: ExternalEditorOptions): Prom
 				stdio: "inherit",
 				shell: process.platform === "win32",
 			});
-			child.on("error", () => resolve(null));
-			child.on("close", (code) => resolve(code));
+			let failed = false;
+			child.on("error", () => {
+				failed = true;
+			});
+			child.on("close", (code) => resolve(failed ? null : code));
 		});
 
 		if (exitCode !== 0) {

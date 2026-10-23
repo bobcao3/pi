@@ -1,7 +1,6 @@
 import { spawn, spawnSync } from "node:child_process";
 import * as crypto from "node:crypto";
 import * as fs from "node:fs";
-import * as os from "node:os";
 import * as path from "node:path";
 import { DEFAULT_RADIUS_GATEWAY } from "@earendil-works/pi-ai/providers/radius-config";
 import { type Container, type EditorComponent, hyperlink, type TUI } from "@earendil-works/pi-tui";
@@ -9,6 +8,7 @@ import { getAuthCredential } from "../../cli/auth-command.ts";
 import { getShareViewerUrl } from "../../config.ts";
 import type { AgentSession } from "../../core/agent-session.ts";
 import { exportSessionToJsonl } from "../../core/session-export.ts";
+import { createTempDirectory } from "../../utils/temp-paths.ts";
 import { BorderedLoader } from "./components/bordered-loader.ts";
 import { theme } from "./theme/theme.ts";
 
@@ -55,7 +55,7 @@ export function exportSessionForShare(filePath: string, session: AgentSession): 
 
 /** Share the current session through Radius, falling back to a private gist. */
 export async function shareSession(context: SessionShareContext): Promise<void> {
-	const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-share-"));
+	const tempDir = createTempDirectory("pi-share-");
 	const jsonlFile = path.join(tempDir, "session.jsonl");
 	const htmlFile = path.join(tempDir, "session.html");
 
@@ -172,23 +172,30 @@ async function shareViaGist(tmpFile: string, context: SessionShareContext): Prom
 
 	let proc: ReturnType<typeof spawn> | null = null;
 	loader.onAbort = () => {
-		proc?.kill();
+		proc?.kill("SIGKILL");
 		restoreEditor(loader, context);
 		context.showStatus("Share cancelled");
 	};
 
 	try {
-		const result = await new Promise<{ stdout: string; stderr: string; code: number | null }>((resolve) => {
+		const result = await new Promise<{ stdout: string; stderr: string; code: number | null }>((resolve, reject) => {
 			proc = spawn("gh", ["gist", "create", "--public=false", tmpFile]);
 			let stdout = "";
 			let stderr = "";
+			let spawnError: Error | undefined;
+			proc.on("error", (error) => {
+				spawnError = error;
+			});
 			proc.stdout?.on("data", (data) => {
 				stdout += data.toString();
 			});
 			proc.stderr?.on("data", (data) => {
 				stderr += data.toString();
 			});
-			proc.on("close", (code) => resolve({ stdout, stderr, code }));
+			proc.on("close", (code) => {
+				if (spawnError) reject(spawnError);
+				else resolve({ stdout, stderr, code });
+			});
 		});
 
 		if (loader.signal.aborted) return;

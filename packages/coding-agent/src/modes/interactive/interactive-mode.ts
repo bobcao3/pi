@@ -3,7 +3,6 @@
  * Handles TUI rendering and user interaction, delegating business logic to AgentSession.
  */
 
-import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -109,6 +108,7 @@ import { DefaultPackageManager } from "../../core/package-manager.ts";
 import { RADIUS_MCP_URL, RADIUS_PROVIDER_ID } from "../../core/radius.ts";
 import type { ResourceDiagnostic } from "../../core/resource-loader.ts";
 import { formatMissingSessionCwdPrompt, MissingSessionCwdError } from "../../core/session-cwd.ts";
+import type { DeleteSessionOptions } from "../../core/session-delete.ts";
 import {
 	type SessionEntry,
 	SessionManager,
@@ -131,6 +131,7 @@ import { copyToClipboard, readClipboardFilePaths, readClipboardText } from "../.
 import { extensionForImageMimeType, readClipboardImage } from "../../utils/clipboard-image.ts";
 import { parseGitUrl } from "../../utils/git.ts";
 import { ensurePngTranscoder } from "../../utils/image-convert.ts";
+import { writeOutputFile } from "../../utils/output-files.ts";
 import { getCwdRelativePath } from "../../utils/paths.ts";
 import { getPiUserAgent } from "../../utils/pi-user-agent.ts";
 import { killTrackedDetachedChildren } from "../../utils/shell.ts";
@@ -437,6 +438,7 @@ function formatLoginProviderCompletionDescription(provider: LoginProviderComplet
  */
 export interface InteractiveModeOptions {
 	createVcsSource?: VcsSourceFactory;
+	sessionDeleteOptions?: DeleteSessionOptions;
 	/** Providers that were migrated to auth.json (shows warning) */
 	migratedProviders?: string[];
 	/** Diagnostics collected before the interactive TUI was initialized. */
@@ -3169,11 +3171,8 @@ export class InteractiveMode {
 
 			const image = await readClipboardImage();
 			if (image) {
-				const tmpDir = os.tmpdir();
 				const ext = extensionForImageMimeType(image.mimeType) ?? "png";
-				const fileName = `pi-clipboard-${crypto.randomUUID()}.${ext}`;
-				const filePath = path.join(tmpDir, fileName);
-				fs.writeFileSync(filePath, Buffer.from(image.bytes));
+				const filePath = await writeOutputFile("pi-clipboard", `.${ext}`, image.bytes);
 
 				this.editor.insertTextAtCursor?.(filePath);
 				this.ui.requestRender();
@@ -4327,46 +4326,59 @@ export class InteractiveMode {
 	 * repaint the final frame while the process is exiting.
 	 */
 	private isShuttingDown = false;
+	private shutdownPromise: Promise<void> | undefined;
 
-	private async shutdown(options?: { fromSignal?: boolean }): Promise<void> {
-		if (this.isShuttingDown) return;
+	private shutdown(options?: { fromSignal?: boolean }): Promise<void> {
+		if (this.shutdownPromise) return this.shutdownPromise;
+		if (this.isShuttingDown) return Promise.resolve();
 		this.isShuttingDown = true;
 		// Keep signal handlers registered until terminal cleanup has completed.
 		// `signal-exit` checks the listener list during the same SIGTERM/SIGHUP
 		// dispatch and re-sends the signal if only its own listeners remain.
 
-		if (options?.fromSignal) {
-			// Signal-triggered shutdown (SIGTERM/SIGHUP). Emit extension cleanup
-			// (session_shutdown) BEFORE touching the terminal. Extension teardown
-			// such as removing sockets does not write to the tty, so it must not be
-			// skipped if a later terminal-restore write fails on a dead or stalled
-			// terminal. If the terminal is gone, the restore writes below emit EIO,
-			// which the stdout/stderr error handler turns into emergencyTerminalExit;
-			// the render loop is already idle, so this cannot hot-spin (see #4144).
-			await this.runtimeHost.dispose();
+		this.shutdownPromise = (async () => {
+			const paused = !options?.fromSignal && this.isInitialized;
+			if (paused) {
+				await this.ui.terminal.drainInput(1000);
+				this.ui.stop({ preserveScreen: true });
+			}
+			try {
+				await this.runtimeHost.dispose();
+			} catch (error) {
+				this.isShuttingDown = false;
+				this.shutdownRequested = false;
+				if (paused) {
+					this.ui.start();
+					this.ui.requestRender(true);
+				}
+				this.showError(`Shutdown incomplete: ${error instanceof Error ? error.message : String(error)}`);
+				return;
+			}
 			this.themeController.disableAutoSync();
-			await this.ui.terminal.drainInput(1000);
+			if (options?.fromSignal) {
+				// Signal-triggered shutdown (SIGTERM/SIGHUP). Emit extension cleanup
+				// (session_shutdown) BEFORE touching the terminal. Extension teardown
+				// such as removing sockets does not write to the tty, so it must not be
+				// skipped if a later terminal-restore write fails on a dead or stalled
+				// terminal. If the terminal is gone, the restore writes below emit EIO,
+				// which the stdout/stderr error handler turns into emergencyTerminalExit;
+				// the render loop is already idle, so this cannot hot-spin (see #4144).
+				await this.ui.terminal.drainInput(1000);
+			}
 			this.stop();
+			if (options?.fromSignal) {
+				killTrackedDetachedChildren();
+			} else {
+				const resumeCommand = formatResumeCommand(this.sessionManager);
+				if (resumeCommand) {
+					process.stdout.write(`${chalk.dim("To resume this session:")} ${resumeCommand}\n`);
+				}
+			}
 			process.exit(0);
-		}
-
-		// Interactive quit (Ctrl+D, Ctrl+C, /quit, extension shutdown()). Stop the
-		// TUI before emitting shutdown events so extension UI cleanup cannot repaint
-		// the final frame while the process is exiting.
-		// Drain any in-flight Kitty key release events before stopping.
-		// This prevents escape sequences from leaking to the parent shell over slow SSH.
-		this.themeController.disableAutoSync();
-		await this.ui.terminal.drainInput(1000);
-
-		this.stop();
-		await this.runtimeHost.dispose();
-
-		const resumeCommand = formatResumeCommand(this.sessionManager);
-		if (resumeCommand) {
-			process.stdout.write(`${chalk.dim("To resume this session:")} ${resumeCommand}\n`);
-		}
-
-		process.exit(0);
+		})().finally(() => {
+			this.shutdownPromise = undefined;
+		});
+		return this.shutdownPromise;
 	}
 
 	private emergencyTerminalExit(): never {
@@ -4439,7 +4451,6 @@ export class InteractiveMode {
 				// first, then attempts terminal restore. A genuinely dead terminal
 				// surfaces as an EIO on the restore writes, which the stdout/stderr
 				// error handler converts into emergencyTerminalExit (see #4144, #5080).
-				killTrackedDetachedChildren();
 				void this.shutdown({ fromSignal: true });
 			};
 			process.prependListener(signal, handler);
@@ -5861,6 +5872,7 @@ export class InteractiveMode {
 					},
 					showRenameHint: true,
 					keybindings: this.keybindings,
+					sessionDeleteOptions: this.options.sessionDeleteOptions,
 				},
 
 				this.sessionManager.getSessionFile(),

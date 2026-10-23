@@ -17,26 +17,24 @@ export function runClipboardCommand(
 		});
 		const chunks: Buffer[] = [];
 		let length = 0;
-		let settled = false;
-		const finish = (result: Buffer | undefined): void => {
-			if (settled) return;
-			settled = true;
-			clearTimeout(timer);
-			resolve(result);
-		};
+		let aborted = false;
 		const abort = (): void => {
+			if (aborted) return;
+			aborted = true;
 			child.kill("SIGKILL");
 			child.stdout?.destroy();
 			child.stdin?.destroy();
-			finish(undefined);
 		};
 		const timer = setTimeout(abort, options?.timeoutMs ?? 3000);
-		child.on("error", () => finish(undefined));
-		child.on("close", (code) => {
-			if (!settled) finish(code === 0 ? Buffer.concat(chunks, length) : undefined);
+		child.on("error", () => {
+			aborted = true;
+		});
+		child.once("close", (code) => {
+			clearTimeout(timer);
+			resolve(!aborted && code === 0 ? Buffer.concat(chunks, length) : undefined);
 		});
 		child.stdout?.on("data", (chunk: Buffer) => {
-			if (settled) return;
+			if (aborted) return;
 			length += chunk.length;
 			if (length > (options?.maxBufferBytes ?? 50 * 1024 * 1024)) abort();
 			else chunks.push(chunk);

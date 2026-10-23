@@ -4,6 +4,7 @@
 
 import { setKeybindings } from "@earendil-works/pi-tui";
 import { KeybindingsManager } from "../core/keybindings.ts";
+import type { DeleteSessionOptions } from "../core/session-delete.ts";
 import type { SessionInfo, SessionListProgress } from "../core/session-manager.ts";
 import type { SettingsManager } from "../core/settings-manager.ts";
 import { SessionSelectorComponent } from "../modes/interactive/components/session-selector.ts";
@@ -16,6 +17,7 @@ export async function selectSession(
 	currentSessionsLoader: SessionsLoader,
 	allSessionsLoader: SessionsLoader,
 	settingsManager: SettingsManager,
+	sessionDeleteOptions?: DeleteSessionOptions,
 ): Promise<string | null> {
 	const ui = await createStartupTui(settingsManager);
 	return new Promise((resolve) => {
@@ -45,7 +47,7 @@ export async function selectSession(
 				process.exit(0);
 			},
 			() => ui.requestRender(),
-			{ showRenameHint: false, keybindings },
+			{ showRenameHint: false, keybindings, sessionDeleteOptions },
 		);
 
 		ui.addChild(selector);

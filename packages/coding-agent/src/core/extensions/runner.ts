@@ -17,6 +17,7 @@ import type { ResourceDiagnostic } from "../diagnostics.ts";
 import type { KeybindingsConfig } from "../keybindings.ts";
 import type { ModelRegistry } from "../model-registry.ts";
 import type { ScopedModel } from "../model-resolver.ts";
+import { runSessionCleanup, type SessionCleanupContext, type SessionCleanupResult } from "../session-cleanup.ts";
 import type { SessionManager } from "../session-manager.ts";
 import {
 	type BuildSystemPromptOptions,
@@ -81,6 +82,7 @@ import type {
 	SessionBeforeSwitchResult,
 	SessionBeforeTreeResult,
 	SessionBoundaryDraft,
+	SessionCleanupEvent,
 	SessionShutdownEvent,
 	ThinkingRenderer,
 	ToolCallEvent,
@@ -183,6 +185,7 @@ interface BeforeAgentStartCombinedResult {
  */
 type RunnerEmitEvent = Exclude<
 	ExtensionEvent,
+	| SessionCleanupEvent
 	| ToolCallEvent
 	| ProjectTrustEvent
 	| ToolResultEvent
@@ -421,6 +424,33 @@ export class ExtensionRunner {
 		this.cwd = cwd;
 		this.sessionManager = sessionManager;
 		this.modelRegistry = modelRegistry;
+	}
+
+	async cleanupSession(
+		reason: SessionCleanupContext["reason"],
+		steps: readonly (() => Promise<unknown>)[],
+		timeoutMs?: number,
+	): Promise<void> {
+		const ctx = this.createContext();
+		const hooks = snapshotEventHandlers(this.extensions, "session_cleanup").flatMap(({ ext, handlers }) =>
+			handlers.map((handler, index) => ({
+				name: `${ext.path}:${index + 1}`,
+				hook: (context: SessionCleanupContext, signal: AbortSignal) =>
+					this.runHandler(ext.path, "session_cleanup", () =>
+						handler(Object.freeze({ ...context, type: "session_cleanup", signal }), ctx),
+					) as Promise<SessionCleanupResult | undefined>,
+			})),
+		);
+		await runSessionCleanup(
+			hooks,
+			{
+				reason,
+				session_id: this.sessionManager.getSessionId(),
+				session_dir: this.sessionManager.getSessionDir(),
+			},
+			steps,
+			timeoutMs,
+		);
 	}
 
 	bindCore(

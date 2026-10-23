@@ -70,6 +70,7 @@ import type { McpServerConfig, McpServerRegistry, RegisteredMcpServer } from "..
 import type { CustomMessage } from "../messages.ts";
 import type { ModelRegistry } from "../model-registry.ts";
 import type { ScopedModel } from "../model-resolver.ts";
+import type { SessionCleanupContext, SessionCleanupResult } from "../session-cleanup.ts";
 import type {
 	BranchSummaryEntry,
 	CompactionEntry,
@@ -106,6 +107,7 @@ import type {
 import type { ModelRoute, ModelRouteRequest, VirtualModelDefinition } from "../virtual-models.ts";
 
 export type { ExecOptions, ExecResult } from "../exec.ts";
+export type { SessionCleanupContext, SessionCleanupHook, SessionCleanupResult } from "../session-cleanup.ts";
 export type { BuildSystemPromptOptions, NormalizedBuildSystemPromptOptions } from "../system-prompt.ts";
 export type { AgentToolResult, AgentToolUpdateCallback, ToolExecutionMode };
 export type { AppKeybinding, KeybindingsManager } from "../keybindings.ts";
@@ -876,6 +878,11 @@ export interface SessionShutdownEvent {
 	targetSessionFile?: string;
 }
 
+export interface SessionCleanupEvent extends SessionCleanupContext {
+	readonly type: "session_cleanup";
+	readonly signal: AbortSignal;
+}
+
 /** Preparation data for tree navigation */
 export interface TreePreparation {
 	targetId: string;
@@ -916,6 +923,7 @@ export type SessionEvent =
 	| SessionCompactEvent
 	| SessionCompactFailedEvent
 	| SessionShutdownEvent
+	| SessionCleanupEvent
 	| SessionBeforeTreeEvent
 	| SessionTreeEvent;
 
@@ -1687,6 +1695,7 @@ export interface ExtensionAPI {
 	on(event: "session_compact", handler: ExtensionHandler<SessionCompactEvent>): () => void;
 	on(event: "session_compact_failed", handler: ExtensionHandler<SessionCompactFailedEvent>): () => void;
 	on(event: "session_shutdown", handler: ExtensionHandler<SessionShutdownEvent>): () => void;
+	on(event: "session_cleanup", handler: ExtensionHandler<SessionCleanupEvent, SessionCleanupResult>): () => void;
 	on(event: "mcp_servers_change", handler: ExtensionHandler<McpServersChangeEvent>): () => void;
 	on(
 		event: "session_before_tree",

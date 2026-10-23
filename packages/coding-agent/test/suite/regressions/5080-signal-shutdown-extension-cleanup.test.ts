@@ -18,9 +18,10 @@ import { InteractiveMode } from "../../../src/modes/interactive/interactive-mode
 
 type ShutdownThis = {
 	isShuttingDown: boolean;
+	isInitialized: boolean;
 	unregisterSignalHandlers: () => void;
 	runtimeHost: { dispose: () => Promise<void> };
-	ui: { terminal: { drainInput: (ms: number) => Promise<void> } };
+	ui: { stop: () => void; terminal: { drainInput: (ms: number) => Promise<void> } };
 	themeController: { disableAutoSync: () => void };
 	stop: () => void;
 	sessionManager: SessionManager;
@@ -75,6 +76,7 @@ function restoreStdoutIsTTY(): void {
 function createContext(order: string[], sessionManager = createSessionManager()): ShutdownThis {
 	return {
 		isShuttingDown: false,
+		isInitialized: true,
 		unregisterSignalHandlers: vi.fn(),
 		runtimeHost: {
 			dispose: vi.fn(async () => {
@@ -82,6 +84,9 @@ function createContext(order: string[], sessionManager = createSessionManager())
 			}),
 		},
 		ui: {
+			stop: () => {
+				order.push("pause");
+			},
 			terminal: {
 				drainInput: vi.fn(async () => {
 					order.push("drainInput");
@@ -135,7 +140,7 @@ describe("InteractiveMode.shutdown ordering (#5080)", () => {
 
 		await callShutdown(context);
 
-		expect(order).toEqual(["drainInput", "stop", "dispose"]);
+		expect(order).toEqual(["drainInput", "pause", "dispose", "stop"]);
 	});
 
 	test("interactive quit prints a resume hint for persisted sessions", async () => {
@@ -151,7 +156,7 @@ describe("InteractiveMode.shutdown ordering (#5080)", () => {
 
 		await callShutdown(context);
 
-		expect(order).toEqual(["drainInput", "stop", "dispose"]);
+		expect(order).toEqual(["drainInput", "pause", "dispose", "stop"]);
 		expect(stdoutWrite).toHaveBeenCalledWith(
 			`${chalk.dim("To resume this session:")} ${APP_NAME} --session test-session\n`,
 		);
@@ -175,7 +180,7 @@ describe("InteractiveMode.shutdown ordering (#5080)", () => {
 		}
 	});
 
-	test("re-entrant shutdown is a no-op", async () => {
+	test("does not start graceful shutdown after a crash exit was latched", async () => {
 		vi.spyOn(process, "exit").mockImplementation((() => {
 			throw new ProcessExitError();
 		}) as typeof process.exit);

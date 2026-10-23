@@ -682,7 +682,7 @@ function parseSessionHeaderCandidate(line: string): SessionHeader | null | undef
 	return entry;
 }
 
-function readSessionHeader(filePath: string): SessionHeader | null {
+export function readSessionHeader(filePath: string): SessionHeader | null {
 	const fd = openSync(filePath, "r");
 	try {
 		const decoder = new StringDecoder("utf8");
