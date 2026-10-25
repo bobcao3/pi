@@ -105,11 +105,48 @@ describe("full execution rendering boundary", () => {
 		expect(views[0].expanded).toBe(true);
 		replace = true;
 		host.updateArgs({ a: 2 });
+		host.render(80);
 		expect(views[0].disposed).toBe(true);
 		expect(views[1].disposed).toBe(false);
 		host.dispose();
 		host.dispose();
 		expect(views[1].disposed).toBe(true);
+	});
+
+	// #9265: argument deltas must not re-run renderers between terminal frames.
+	it.each([false, true])("coalesces streamed arguments for delegated rendering (batch: %s)", (batched) => {
+		let renders = 0;
+		const view = new ExecutionView("", 0, 0);
+		const renderers: ToolRenderers = {
+			renderExecution: (snapshot) => {
+				renders++;
+				view.setText(JSON.stringify(snapshot.args));
+				return view;
+			},
+			renderBatchExecution: (calls) => {
+				renders++;
+				view.setText(calls.map(({ snapshot }) => JSON.stringify(snapshot.args)).join("\n"));
+				return view;
+			},
+		};
+		const host = batched
+			? new ToolExecutionBatchComponent("read", "a", {}, renderers, ui(), "/tmp")
+			: new ToolExecutionComponent("read", "a", {}, {}, renderers, ui(), "/tmp");
+		const member = host instanceof ToolExecutionBatchComponent ? host.addCall("a", {}) : host;
+		const before = renders;
+		for (const path of ["f", "fi", "file.txt"]) member.updateArgs({ path });
+		expect(renders).toBe(before);
+		expect(member.getSnapshot().args).toEqual({ path: "file.txt" });
+		expect(host.render(80).join("\n")).toContain('"path":"file.txt"');
+		expect(renders).toBe(before + 1);
+		host.render(80);
+		expect(renders).toBe(before + 1);
+		member.updateArgs({ path: "final.txt" });
+		member.setArgsComplete();
+		expect(host.render(80).join("\n")).toContain('"path":"final.txt"');
+		expect(renders).toBe(before + 2);
+		host.dispose();
+		expect(view.disposed).toBe(true);
 	});
 
 	it("retains live nested results while merging persisted summaries", () => {

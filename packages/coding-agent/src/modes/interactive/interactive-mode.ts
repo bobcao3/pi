@@ -2495,6 +2495,7 @@ export class InteractiveMode {
 	}
 
 	private resetExtensionUI(): void {
+		this.disposeActiveSelector();
 		if (this.extensionDialogs.length > 0) {
 			for (const dialog of this.extensionDialogs) {
 				dialog.component.dispose?.();
@@ -2749,6 +2750,7 @@ export class InteractiveMode {
 	}
 
 	private showTopExtensionDialog(): void {
+		if (this.activeSelectorToken !== undefined) return;
 		const top = this.extensionDialogs.at(-1);
 		const component = top?.component ?? this.editor;
 		this.editorContainer.clear();
@@ -2883,9 +2885,6 @@ export class InteractiveMode {
 		// Save text from current editor before switching
 		const currentText = this.editor.getText();
 
-		this.disposeActiveSelector();
-		this.editorContainer.clear();
-
 		if (factory) {
 			// Create the custom editor with tui, theme, and keybindings
 			const newEditor = factory(this.ui, getEditorTheme(), this.keybindings);
@@ -2942,7 +2941,6 @@ export class InteractiveMode {
 			this.editor = this.defaultEditor;
 		}
 
-		this.editorContainer.addChild(this.editor as Component);
 		if (this.activeStatusIndicator) {
 			this.statusContainer.clear();
 			this.activeWorkingIndicatorEmbedded = this.setEditorWorkingStatusIndicator(this.activeStatusIndicator);
@@ -2950,8 +2948,7 @@ export class InteractiveMode {
 				this.statusContainer.addChild(this.activeStatusIndicator);
 			}
 		}
-		this.ui.setFocus(this.editor as Component);
-		this.ui.requestRender();
+		this.showTopExtensionDialog();
 	}
 
 	/**
@@ -5017,9 +5014,7 @@ export class InteractiveMode {
 			if (this.activeSelectorToken !== token) return;
 			this.activeSelectorToken = undefined;
 			this.activeSelectorDispose = undefined;
-			this.editorContainer.clear();
-			this.editorContainer.addChild(this.editor);
-			this.ui.setFocus(this.editor);
+			this.showTopExtensionDialog();
 			this.resolveSelectorWaiters();
 		};
 		const created = create(done);

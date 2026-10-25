@@ -26,8 +26,10 @@ try {
   assert(Number.isSafeInteger(id) && id > 0);
   assert.equal(await storage.conversation(id, BACKGROUND_CONTEXT), undefined);
   const record = { id };
-  const sequence = await storage.commit([{ type: "conversation", value: record }], BACKGROUND_CONTEXT);
+  const adopted = [];
+  const sequence = await storage.commit([{ type: "conversation", value: record }], seq => adopted.push(seq), BACKGROUND_CONTEXT);
   assert(Number.isSafeInteger(sequence) && sequence > 0);
+  assert.deepEqual(adopted, [sequence]);
   assert.deepEqual(await storage.conversation(id, BACKGROUND_CONTEXT), record);
 } finally {
   await storage.close(BACKGROUND_CONTEXT);

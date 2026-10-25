@@ -213,8 +213,8 @@ describe("thinking renderer interception", () => {
 					return markdown.replace("original", `transformed ${context.availableWidth}`);
 				},
 			],
-			undefined,
-			undefined,
+			"historical-entry",
+			"2026-10-25",
 			renderer,
 		);
 		component.updateContent(original, true);
@@ -227,22 +227,22 @@ describe("thinking renderer interception", () => {
 				messageType: "assistant-thinking",
 				isStreaming: true,
 				availableWidth: 40,
-				messageId: undefined,
-				timestamp: undefined,
+				messageId: "historical-entry",
+				timestamp: "2026-10-25",
 			},
 			{
 				messageType: "assistant-thinking",
 				isStreaming: true,
 				availableWidth: 24,
-				messageId: undefined,
-				timestamp: undefined,
+				messageId: "historical-entry",
+				timestamp: "2026-10-25",
 			},
 			{
 				messageType: "assistant-thinking",
 				isStreaming: false,
 				availableWidth: 40,
-				messageId: undefined,
-				timestamp: undefined,
+				messageId: "historical-entry",
+				timestamp: "2026-10-25",
 			},
 		]);
 		component.setHideThinkingBlock(true);

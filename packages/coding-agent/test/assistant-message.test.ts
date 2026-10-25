@@ -189,7 +189,7 @@ describe("AssistantMessageComponent", () => {
 		const component = new AssistantMessageComponent(message, false, undefined, "Thinking...", 1, [
 			(markdown, context) => {
 				calls.push("formula");
-				expect(context).toEqual({ messageType: "assistant", isStreaming: false, availableWidth: 78 });
+				expect(context).toMatchObject({ messageType: "assistant", isStreaming: false, availableWidth: 78 });
 				return markdown.replace("$x^2$", "x²");
 			},
 			(markdown) => {
@@ -279,15 +279,20 @@ describe("AssistantMessageComponent", () => {
 			{ type: "text", text: "answer" },
 			{ type: "thinking", thinking: "reasoning" },
 		]);
-		const component = new AssistantMessageComponent(message, false, undefined, "Thinking...", 1, [
-			(markdown, { messageType }) => {
-				return `${messageType}:${markdown}`;
-			},
-		]);
+		const component = new AssistantMessageComponent(
+			message,
+			false,
+			undefined,
+			"Thinking...",
+			1,
+			[(markdown, { messageType, messageId, timestamp }) => `${messageType}:${markdown}:${messageId}:${timestamp}`],
+			"entry-1",
+			"2026-10-25",
+		);
 
 		const rendered = stripAnsi(component.render(80).join("\n"));
-		expect(rendered).toContain("assistant:answer");
-		expect(rendered).toContain("assistant-thinking:reasoning");
+		expect(rendered).toContain("assistant:answer:entry-1:2026-10-25");
+		expect(rendered).toContain("assistant-thinking:reasoning:entry-1:2026-10-25");
 		expect(message.content).toEqual([
 			{ type: "text", text: "answer" },
 			{ type: "thinking", thinking: "reasoning" },

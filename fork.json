@@ -1,12 +1,15 @@
 {
-	"upstreamRevision": "71023aec1546d6d677a65669c5665c0927ce0dd0",
-	"upstreamVersion": "1.3.0",
+	"upstreamRevision": "d5b3de22d0e24a3e9c38a9410d3329b099717283",
+	"upstreamVersion": "1.4.0",
 	"redistributedPackages": [
+		"@earendil-works/chord",
 		"@earendil-works/pi-agent-core",
 		"@earendil-works/pi-ai",
 		"@earendil-works/pi-codemode",
 		"@earendil-works/pi-coding-agent",
 		"@earendil-works/pi-durable",
+		"@earendil-works/pi-mcp",
+		"@earendil-works/pi-telemetry",
 		"@earendil-works/pi-tui"
 	]
 }
